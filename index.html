@@ -1,0 +1,3786 @@
+<!DOCTYPE html>
+<html lang="ko" data-fc-theme="glass">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WBS — 간트 기반 프로젝트 관리</title>
+<meta name="description" content="다수 참여 프로젝트를 위한 간트 차트 기반 WBS 관리. Level 1~4 업무 분해, 담당자·산출물·상태·일정 컬럼과 간트 차트를 한 화면에서.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='28' fill='%230a84ff'/%3E%3Ctext x='50' y='68' font-family='Manrope,sans-serif' font-size='44' font-weight='800' text-anchor='middle' fill='white'%3EWBS%3C/text%3E%3C/svg%3E">
+<style>
+  /* ===== fc-ui Glass theme =====
+     Tokens mirror @fcstudio/fc-ui's THEMES.glass (see fc-ui/src/core/themes.js).
+     Translucent frosted surfaces over a soft pastel bloom background.
+  */
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    /* Explicit palette per user spec — black canvas, bright text, light-grey table lines. */
+    --fc-bg:       #000000;                /* canvas — pure black */
+    --fc-surface:  #0a0a0a;                /* surface-1: topbar, toolbar, panels */
+    --fc-elev:     #141414;                /* surface-2: lifted cards, hovered surfaces */
+    --fc-surface-3:#1a1a1a;                /* surface-3: nested panels */
+    --fc-surface-4:#202020;                /* surface-4: deepest lift */
+    --fc-ink:      #ffffff;                /* primary text — bright white */
+    --fc-ink-2:    #e6e6e6;                /* secondary text */
+    --fc-ink-3:    #c0c0c0;                /* tertiary text — column headers, labels */
+    --fc-ink-4:    #8a8a8a;                /* quaternary — placeholders, footnotes */
+    --fc-accent:   #5e6ad2;                /* Linear lavender-blue (saturated, for fills) */
+    --fc-accent-2: rgba(94,106,210,0.22);  /* accent tint for fills */
+    --fc-accent-hover: #828fff;
+    --fc-accent-focus: #5e69d1;
+    --fc-accent-text: #b5beff;             /* brighter lavender for text on dark / on accent-tinted bg */
+    --fc-line:     #3a3a3a;                /* hairline border on cards/dividers — light grey */
+    --fc-line-2:   #555555;                /* hairline-strong — input focus, emphasis */
+    --fc-line-ink: #404040;                /* table cell separators — light grey per spec */
+    --fc-success: #27a644; --fc-success-2: rgba(39,166,68,0.22);
+    --fc-warn:    #d18b2a; --fc-warn-2:    rgba(209,139,42,0.22);
+    --fc-danger:  #e5484d; --fc-danger-2:  rgba(229,72,77,0.20);
+    --fc-purple:  #a48aff;
+    --fc-orange:  #d18b2a;
+    --fc-font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+    --fc-font-body:    'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text',    system-ui, sans-serif;
+    --fc-font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --fc-r-sm: 6px; --fc-r-md: 8px; --fc-r-lg: 12px; --fc-r-pill: 999px;
+    --fc-shadow-card: 0 0 0 1px var(--fc-line), 0 1px 2px 0 rgba(0,0,0,0.4);
+    --fc-shadow-pop:  0 0 0 1px var(--fc-line-2), 0 16px 32px -8px rgba(0,0,0,0.6);
+
+    /* layout */
+    --topbar-h: 56px;
+    --row-h: 36px;
+    --day-w: 18px;
+    /* Column widths — independent per column so each can be resized via the header
+       handle. Persisted in localStorage under WBS_COLWIDTHS_KEY. */
+    --col-name-w: 320px;
+    --col-rfp-w: 96px;
+    --col-assignee-w: 108px;
+    --col-deliv-w: 144px;
+    --col-status-w: 116px;
+    --col-progress-w: 96px;
+    --col-start-w: 124px;
+    --col-end-w: 124px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--fc-bg);
+    background-attachment: fixed;
+    color: var(--fc-ink);
+    font-family: var(--fc-font-body);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.005em;
+    /* Tell the UA the page is dark so native controls (date picker, scrollbar,
+       option dropdown, form widgets) render with their dark theme. */
+    color-scheme: dark;
+  }
+
+  /* Surface mixin — sits on the canvas with only a hairline border for separation.
+     Uses --fc-bg (not --fc-surface) so the big topbar / main panels blend with the
+     true canvas instead of reading as a separate grey layer. Cards (.report-card,
+     .modal-card, etc.) still use --fc-surface explicitly for slight elevation. */
+  [data-fc-glass] {
+    background: var(--fc-bg);
+    border: 1px solid var(--fc-line);
+    box-shadow: var(--fc-shadow-card);
+  }
+
+  /* ───── Top bar ───── */
+  .topbar {
+    height: var(--topbar-h);
+    margin: 12px 16px 6px;
+    border-radius: var(--fc-r-lg);
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+    gap: 14px;
+    position: relative;
+    z-index: 10;
+  }
+  .logo {
+    font-family: var(--fc-font-display);
+    font-weight: 800;
+    font-size: 17px;
+    letter-spacing: -0.022em;
+    color: var(--fc-ink);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .logo .dot {
+    width: 22px; height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #0a84ff, #bf5af2);
+    color: #fff;
+    font-size: 11px;
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.04), 0 2px 6px rgba(94,106,210,0.48);
+  }
+  .project-name {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--fc-line);
+    color: var(--fc-ink);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: var(--fc-r-sm);
+    transition: background .15s, border-color .15s;
+    min-width: 200px;
+    font-family: var(--fc-font-body);
+  }
+  .project-name:hover { background: rgba(255,255,255,0.06); }
+  .project-name:focus {
+    border-color: var(--fc-accent);
+    background: rgba(255,255,255,0.08);
+    outline: none;
+    box-shadow: 0 0 0 3px var(--fc-accent-2);
+  }
+  .spacer { flex: 1; }
+  .save-status {
+    font-size: 11px;
+    color: var(--fc-ink-3);
+    font-family: var(--fc-font-mono);
+  }
+  .top-btn {
+    padding: 7px 14px;
+    border-radius: var(--fc-r-sm);
+    background: rgba(255,255,255,0.04);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    border: 1px solid var(--fc-line);
+    color: var(--fc-ink-2);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--fc-font-body);
+    transition: all .15s;
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.04);
+    letter-spacing: -0.01em;
+  }
+  .top-btn:hover {
+    background: rgba(255,255,255,0.07);
+    color: var(--fc-ink);
+    transform: translateY(-1px);
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.06), 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .top-btn.primary {
+    background: var(--fc-accent);
+    border-color: rgba(94,106,210,0.65);
+    color: #fff;
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.02), 0 2px 8px rgba(94,106,210,0.48);
+  }
+  .top-btn.primary:hover {
+    background: #1c8eff;
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.03), 0 4px 14px rgba(94,106,210,0.6);
+  }
+
+  /* ───── Main ───── */
+  .main {
+    height: calc(100vh - var(--topbar-h) - 18px);
+    display: flex;
+    flex-direction: column;
+    margin: 6px 16px 16px;
+    border-radius: var(--fc-r-lg);
+    overflow: hidden;
+  }
+  /* .main inherits the surface mixin from [data-fc-glass]; no override needed.
+     (Previous fc-ui glass theme used a translucent white wash here — that's now removed
+     so the main panel reads as the true canvas color.) */
+
+  .toolbar {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+    font-size: 11px;
+    color: var(--fc-ink-3);
+    border-bottom: 1px solid var(--fc-line-ink);
+    background: rgba(255,255,255,0.02);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+  .toolbar .stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: var(--fc-r-pill);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--fc-line);
+    font-family: var(--fc-font-mono);
+    color: var(--fc-ink-2);
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.04);
+  }
+  .toolbar .stat .v { color: var(--fc-ink); font-weight: 700; }
+
+  /* Status filter buttons (완료/진행중/지연) — clickable .stat variants.
+     Same shape as a passive stat but with hover affordance and a saturated active
+     state when the user has toggled that status as the row filter. */
+  .toolbar button.stat {
+    cursor: pointer;
+    font-family: var(--fc-font-mono);
+    font-size: 11px;
+    transition: background .12s, border-color .12s, color .12s;
+  }
+  .toolbar button.stat:hover { background: var(--fc-elev); border-color: var(--fc-line-2); color: var(--fc-ink); }
+  .toolbar button.stat.active {
+    background: rgba(94,106,210,0.22);
+    border-color: rgba(94,106,210,0.55);
+    color: var(--fc-ink);
+  }
+  .toolbar button.stat.active .v { color: var(--fc-accent-text); }
+  .toolbar button.stat[data-status-filter="delayed"].active {
+    background: rgba(229,72,77,0.20);
+    border-color: rgba(229,72,77,0.5);
+  }
+  .toolbar button.stat[data-status-filter="delayed"].active .v { color: var(--fc-danger); }
+  .toolbar .assignee-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    background: rgba(255,255,255,0.04);
+    border-radius: var(--fc-r-pill);
+    border: 1px solid var(--fc-line);
+    padding: 0 4px 0 10px;
+    min-width: 200px;
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.04);
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .toolbar .assignee-filter .icon {
+    font-size: 11px;
+    color: var(--fc-ink-3);
+    display: inline-flex;
+    align-items: center;
+  }
+  .toolbar .assignee-filter input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    padding: 5px 0;
+    font-size: 12px;
+    font-family: var(--fc-font-body);
+    color: var(--fc-ink);
+    outline: none;
+  }
+  .toolbar .assignee-filter input::placeholder { color: var(--fc-ink-3); }
+  .toolbar .assignee-filter .count {
+    font-family: var(--fc-font-mono);
+    font-size: 10px;
+    color: var(--fc-ink-3);
+    padding: 0 2px;
+    white-space: nowrap;
+  }
+  .toolbar .assignee-filter button {
+    width: 18px; height: 18px;
+    border: 0; background: transparent; cursor: pointer;
+    color: var(--fc-ink-3);
+    font-size: 14px;
+    line-height: 1;
+    border-radius: 50%;
+    visibility: hidden;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 0;
+  }
+  .toolbar .assignee-filter button:hover { background: rgba(255,255,255,0.06); color: var(--fc-ink); }
+  .toolbar .assignee-filter.has-value button { visibility: visible; }
+  .toolbar .assignee-filter.has-value .icon { color: var(--fc-accent-text); }
+  .toolbar .assignee-filter:focus-within {
+    border-color: var(--fc-accent);
+    box-shadow: 0 0 0 3px var(--fc-accent-2);
+  }
+
+  .empty-filter {
+    padding: 36px 16px;
+    text-align: center;
+    color: var(--fc-ink-3);
+    font-size: 12.5px;
+  }
+
+  .toolbar .zoom {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+    padding: 3px;
+    background: rgba(255,255,255,0.03);
+    border-radius: var(--fc-r-pill);
+    border: 1px solid var(--fc-line);
+  }
+  .toolbar .zoom button {
+    padding: 3px 11px;
+    background: transparent;
+    border: none;
+    color: var(--fc-ink-2);
+    border-radius: var(--fc-r-pill);
+    cursor: pointer;
+    font-size: 11px;
+    font-family: var(--fc-font-mono);
+    font-weight: 600;
+    transition: all .15s;
+  }
+  .toolbar .zoom button:hover { background: rgba(255,255,255,0.04); }
+  .toolbar .zoom button.active {
+    background: var(--fc-accent);
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(94,106,210,0.48);
+  }
+
+  /* ───── Wbs/Gantt split ───── */
+  .wbs {
+    flex: 1;
+    overflow: auto;
+    position: relative;
+  }
+  .grid-row {
+    display: grid;
+    grid-template-columns:
+      var(--col-name-w)
+      var(--col-rfp-w)
+      var(--col-assignee-w)
+      var(--col-deliv-w)
+      var(--col-status-w)
+      var(--col-progress-w)
+      var(--col-start-w)
+      var(--col-end-w)
+      var(--gantt-w, 1fr);   /* Gantt column uses its actual chart width (set by JS)
+                                so the timeline can be wider than the viewport and
+                                the .wbs container scrolls horizontally. */
+    /* Size the row's bounding box to the full grid track sum (not just .wbs's width).
+       Without this, position:sticky cells get pushed off-screen near max horizontal
+       scroll because their containing block stops at the row's narrower bbox. */
+    width: max-content;
+    min-width: 100%;
+    border-bottom: 1px solid var(--fc-line-ink);
+    min-height: var(--row-h);
+  }
+
+  /* Sticky header */
+  .header-row {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid var(--fc-line-ink);
+    font-size: 10px;
+    color: var(--fc-ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+  }
+  .header-row .cell {
+    padding: 10px 12px;
+    border-right: 1px solid var(--fc-line-ink);
+    display: flex;
+    align-items: center;
+  }
+  .header-row .gantt-axis-cell { padding: 0; }
+  .header-row .cell { position: relative; }
+
+  /* Column resize handle — sits on the right border of each header cell. 4px wide
+     hit area that widens visually on hover. The Gantt column doesn't get one. */
+  .col-resize {
+    position: absolute;
+    top: 0; bottom: 0;
+    right: -2px;
+    width: 6px;
+    cursor: ew-resize;
+    z-index: 6;
+    user-select: none;
+  }
+  .col-resize::after {
+    content: "";
+    position: absolute;
+    top: 6px; bottom: 6px;
+    left: 2px;
+    width: 2px;
+    background: transparent;
+    border-radius: 2px;
+    transition: background .15s;
+  }
+  .col-resize:hover::after { background: var(--fc-accent); }
+  body[data-col-resizing] { cursor: ew-resize; user-select: none; }
+  body[data-col-resizing] .col-resize::after { background: var(--fc-accent); }
+
+  /* Row selection — click a task row to select it, Shift+click to toggle into a multi-set.
+     Temporary visual tint; cleared by clicking the same single-selected row. */
+  .task-row.row-selected,
+  .task-row.row-selected:hover,
+  .task-row.level-1.row-selected,
+  .task-row.level-1.row-selected:hover {
+    background: rgba(10, 132, 255, 0.16);
+    box-shadow: inset 3px 0 0 0 var(--fc-accent);
+  }
+
+  /* Column selection — click a header to pin its column to the left of horizontal scroll,
+     Shift+click to pin multiple. Pinned cells use near-opaque backgrounds so gantt bars
+     and grid content scrolling underneath don't bleed through. */
+  .header-row .cell[data-col-key] { cursor: pointer; user-select: none; }
+  .cell.col-pinned {
+    position: sticky;
+    z-index: 3;
+    /* Lifted "frozen panel" — clearly brighter and more lavender-tinted than the new
+       dark-grey canvas/surface so pinned columns read as elevated. MUST be opaque so
+       bars scrolling underneath don't bleed through. Brighter inner hairlines
+       (border-right / border-bottom) restore the grid separator visibility that would
+       otherwise vanish into the same-luminance default --fc-line-ink color. */
+    background: #2a3149;
+    border-right-color: rgba(255,255,255,0.08);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .task-row:hover .cell.col-pinned          { background: #323b58; }
+  .task-row.level-1 .cell.col-pinned        { background: #2f3650; }
+  .task-row.level-1:hover .cell.col-pinned  { background: #384062; }
+  .task-row.row-selected .cell.col-pinned,
+  .task-row.row-selected:hover .cell.col-pinned { background: #3f4878; }
+  .header-row .cell.col-pinned {
+    background: #323a58;
+    color: #c8cffd;  /* brighter lavender so the header label pops against the wash */
+    z-index: 2;  /* relative to .header-row's own z-index 5 — keeps pinned header above peers */
+  }
+
+  /* Per-column sticky-left offsets — values are set as CSS vars on :root by
+     recomputeStickyOffsets() based on the current pinned set + each column's width. */
+  .cell[data-col-key="name"].col-pinned     { left: var(--sticky-left-name, 0px); }
+  .cell[data-col-key="rfp"].col-pinned      { left: var(--sticky-left-rfp, 0px); }
+  .cell[data-col-key="assignee"].col-pinned { left: var(--sticky-left-assignee, 0px); }
+  .cell[data-col-key="deliv"].col-pinned    { left: var(--sticky-left-deliv, 0px); }
+  .cell[data-col-key="status"].col-pinned   { left: var(--sticky-left-status, 0px); }
+  .cell[data-col-key="progress"].col-pinned { left: var(--sticky-left-progress, 0px); }
+  .cell[data-col-key="start"].col-pinned    { left: var(--sticky-left-start, 0px); }
+  .cell[data-col-key="end"].col-pinned      { left: var(--sticky-left-end, 0px); }
+
+  /* Body rows */
+  .task-row { background: transparent; transition: background .12s; }
+  .task-row:hover { background: rgba(255,255,255,0.04); }
+  .task-row.level-1 {
+    background: rgba(94,106,210,0.10);
+    font-weight: 600;
+  }
+  .task-row.level-1:hover { background: rgba(94,106,210,0.18); }
+
+  .cell {
+    padding: 0 10px;
+    border-right: 1px solid var(--fc-line-ink);
+    display: flex;
+    align-items: center;
+    min-height: var(--row-h);
+    overflow: hidden;
+  }
+  .cell.name-cell { gap: 6px; }
+
+  .toggle {
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    color: var(--fc-ink-3);
+    cursor: pointer;
+    border-radius: 5px;
+    flex-shrink: 0;
+    transition: all .12s;
+  }
+  .toggle:hover { color: var(--fc-ink); background: rgba(255,255,255,0.04); }
+  .toggle.leaf { visibility: hidden; }
+
+  .lv-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--fc-font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--fc-ink-3);
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--fc-line);
+    border-radius: 6px;
+    padding: 2px 6px;
+    flex-shrink: 0;
+    letter-spacing: 0.02em;
+  }
+  .lv-1 { color: var(--fc-accent-text);  background: rgba(94,106,210,0.22);  border-color: rgba(94,106,210,0.48); }
+  .lv-2 { color: var(--fc-success); background: rgba(48,209,88,0.12);   border-color: rgba(48,209,88,0.35); }
+  .lv-3 { color: var(--fc-purple);  background: rgba(191,90,242,0.12);  border-color: rgba(191,90,242,0.35); }
+  .lv-4 { color: var(--fc-orange);  background: rgba(255,159,10,0.12);  border-color: rgba(255,159,10,0.35); }
+
+  /* Delay badge — small pill next to the task name. Red for past-deadline (overdue),
+     orange for late-start (start date passed but not yet started). Tooltip carries detail. */
+  .delay-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: var(--fc-r-pill);
+    font-size: 9.5px;
+    font-weight: 700;
+    font-family: var(--fc-font-mono);
+    flex-shrink: 0;
+    cursor: help;
+    letter-spacing: 0.02em;
+  }
+  .delay-badge.overdue {
+    background: rgba(255,69,58,0.16);
+    border: 1px solid rgba(255,69,58,0.4);
+    color: var(--fc-danger);
+  }
+  .delay-badge.late-start {
+    background: rgba(255,159,10,0.16);
+    border: 1px solid rgba(255,159,10,0.4);
+    color: var(--fc-warn);
+  }
+  /* Overdue gantt bar gets a thin red outline so it stands out at a glance even when
+     the user is scanning bars across many rows. Late-start uses a softer outline. */
+  .gantt-bar.delayed { box-shadow: inset 0 0 0 1.5px var(--fc-danger), 0 1px 3px rgba(255,69,58,0.2); }
+  .gantt-bar.delayed.late-start { box-shadow: inset 0 0 0 1.5px var(--fc-warn), 0 1px 3px rgba(255,159,10,0.2); }
+
+  /* WBS toolbar 지연 stat — red value so it pops out of the row of black numbers. */
+  #statDelayed .v { color: var(--fc-danger); }
+  /* Report 'danger' card variant for the 지연 count. */
+  .report-card.danger .value { color: var(--fc-danger); }
+
+  .name-input,
+  .text-input,
+  .date-input,
+  .status-select {
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--fc-ink);
+    padding: 5px 8px;
+    border-radius: var(--fc-r-sm);
+    font-size: 12.5px;
+    font-family: var(--fc-font-body);
+    transition: all .12s;
+  }
+  .name-input { font-weight: 600; letter-spacing: -0.005em; }
+  .name-input:hover,
+  .text-input:hover,
+  .date-input:hover,
+  .status-select:hover { background: rgba(255,255,255,0.04); }
+  .name-input:focus,
+  .text-input:focus,
+  .date-input:focus,
+  .status-select:focus {
+    border-color: var(--fc-accent);
+    background: rgba(255,255,255,0.08);
+    outline: none;
+    box-shadow: 0 0 0 3px var(--fc-accent-2);
+  }
+  .text-input.rfp { font-family: var(--fc-font-mono); font-size: 11px; }
+  .date-input { font-family: var(--fc-font-mono); font-size: 11px; }
+  /* Progress cell — track behind the input shows current %; input is conditionally
+     editable based on status (locked for completed/not-started/blocked/on-hold). */
+  .progress-cell { position: relative; gap: 4px; }
+  .progress-track {
+    position: absolute;
+    inset: 4px 4px;
+    border-radius: 6px;
+    background: rgba(140, 140, 170, 0.10);
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .progress-fill-bar {
+    height: 100%;
+    transition: width .2s ease, background .2s;
+    border-radius: inherit;
+  }
+  .progress-fill-bar.status-not-started { background: rgba(138,143,152,0.25); }
+  .progress-fill-bar.status-in-progress { background: rgba(94,106,210,0.5); }
+  .progress-fill-bar.status-completed   { background: rgba(39,166,68,0.45); }
+  .progress-fill-bar.status-blocked     { background: rgba(229,72,77,0.4); }
+  .progress-fill-bar.status-on-hold     { background: rgba(209,139,42,0.42); }
+  .progress-input {
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--fc-r-sm);
+    color: var(--fc-ink);
+    font-family: var(--fc-font-mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    text-align: right;
+    padding: 4px 18px 4px 8px;
+    -moz-appearance: textfield;
+    appearance: textfield;
+    position: relative;
+    z-index: 1;
+  }
+  .progress-input::-webkit-outer-spin-button,
+  .progress-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .progress-input:hover:not(.locked) { background: rgba(255,255,255,0.04); }
+  .progress-input:focus:not(.locked) {
+    background: rgba(255,255,255,0.08);
+    border-color: var(--fc-accent);
+    outline: none;
+    box-shadow: 0 0 0 3px var(--fc-accent-2);
+  }
+  .progress-input.locked {
+    cursor: not-allowed;
+    color: var(--fc-ink-2);
+  }
+  .progress-input.locked:hover {
+    background: rgba(140, 140, 170, 0.05);
+  }
+  .progress-pct-suffix {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: var(--fc-font-mono);
+    font-size: 10px;
+    color: var(--fc-ink-3);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Derived/rolled-up parent date — visually lighter + italic so it reads as
+     "auto-summary from children" rather than a user-set value. Hover to see tooltip. */
+  .date-input.derived-value {
+    color: var(--fc-ink-3);
+    font-style: italic;
+    background: rgba(140, 140, 170, 0.10);
+    border-color: rgba(140, 140, 170, 0.20);
+  }
+  .date-input.derived-value:hover { background: rgba(255, 255, 255, 0.06); }
+  .date-input.derived-value:focus {
+    color: var(--fc-ink);
+    font-style: normal;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--fc-accent);
+  }
+  .date-input::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.5; }
+  .date-input::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+  .status-select { font-size: 11px; cursor: pointer; }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: var(--fc-r-pill);
+    cursor: pointer;
+    white-space: nowrap;
+    font-family: var(--fc-font-body);
+    width: 100%;
+    justify-content: center;
+    border: 1px solid var(--fc-line);
+    background: var(--fc-elev);
+    color: var(--fc-ink-2);
+    appearance: none;
+    -webkit-appearance: none;
+    box-shadow: none;
+    letter-spacing: 0;
+  }
+  /* Pill colors use brighter tints on a low-alpha background so the label reads at a
+     glance on dark canvas (the underlying accent color was matching its own pill bg
+     too closely and washing out). */
+  /* Parent rows show their auto-summarised status — italic + cursor:default to flag
+     that it's derived (mirrors how `.date-input.derived-value` reads in the date cells). */
+  .status-pill.derived-status { font-style: italic; cursor: default; }
+  .status-pill:disabled { cursor: default; }
+  .status-pill.not-started { color: var(--fc-ink-2); background: var(--fc-elev); }
+  .status-pill.in-progress { color: #b5beff;          background: rgba(94,106,210,0.18); border-color: rgba(94,106,210,0.45); }
+  .status-pill.completed   { color: #7fe09a;          background: rgba(39,166,68,0.16);  border-color: rgba(39,166,68,0.5); }
+  .status-pill.blocked     { color: #ff9ea3;          background: rgba(229,72,77,0.16);  border-color: rgba(229,72,77,0.5); }
+  .status-pill.on-hold     { color: #f5cf86;          background: rgba(209,139,42,0.16); border-color: rgba(209,139,42,0.5); }
+
+  /* Row action buttons */
+  .row-actions { display: none; gap: 3px; margin-left: auto; }
+  .task-row:hover .row-actions { display: inline-flex; }
+  .row-btn {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--fc-line);
+    color: var(--fc-ink-3);
+    cursor: pointer;
+    font-size: 10px;
+    font-family: var(--fc-font-mono);
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all .12s;
+  }
+  .row-btn:hover {
+    color: var(--fc-ink);
+    background: #fff;
+    border-color: rgba(255,255,255,0.10);
+    transform: translateY(-1px);
+  }
+  .row-btn.danger:hover {
+    color: var(--fc-danger);
+    background: var(--fc-danger-2);
+    border-color: rgba(255,69,58,0.4);
+  }
+
+  /* ───── Gantt ───── */
+  .gantt-axis-cell {
+    overflow: hidden;
+    position: relative;
+    border-right: 1px solid var(--fc-line-ink);
+  }
+  .gantt-axis {
+    position: relative;
+    height: 40px;
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid var(--fc-line-ink);
+    overflow: hidden;
+  }
+  .gantt-axis-month {
+    position: absolute;
+    top: 0;
+    height: 20px;
+    border-right: 1px solid var(--fc-line-ink);
+    color: var(--fc-ink-2);
+    font-size: 11px;
+    font-weight: 700;
+    padding-left: 8px;
+    display: flex;
+    align-items: center;
+    background: rgba(255,255,255,0.04);
+    white-space: nowrap;
+    letter-spacing: -0.01em;
+  }
+  .gantt-axis-day {
+    position: absolute;
+    top: 20px;
+    height: 20px;
+    width: var(--day-w);
+    border-right: 1px solid var(--fc-line-ink);
+    color: var(--fc-ink-3);
+    font-size: 9.5px;
+    font-family: var(--fc-font-mono);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .gantt-axis-day.weekend { background: rgba(255,255,255,0.06); }
+  .gantt-axis-day.holiday {
+    background: rgba(255,69,58,0.10);
+    color: var(--fc-danger);
+    font-weight: 700;
+  }
+  .gantt-axis-day.weekend.holiday { background: rgba(255,69,58,0.13); }
+  .gantt-axis-day.today {
+    background: var(--fc-accent-2);
+    color: var(--fc-accent-text);
+    font-weight: 700;
+  }
+
+  .gantt-cell {
+    position: relative;
+    height: var(--row-h);
+    overflow: hidden;
+  }
+  /* Weekend overlay — repeating 7-day pattern (5 transparent + 2 shaded). Sits ABOVE
+     the bars (z-index 4) with a low-alpha tint so bars get a slightly broken/dimmed
+     look as they cross weekends. The horizontal offset aligns the pattern with the
+     current rangeStart's day-of-week (set by renderWbs as --weekend-offset). */
+  .gantt-cell::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(var(--day-w) * 5),
+      rgba(255,255,255,0.06) calc(var(--day-w) * 5),
+      rgba(255,255,255,0.06) calc(var(--day-w) * 7)
+    );
+    background-position: var(--weekend-offset, 0px) 0;
+    pointer-events: none;
+    z-index: 4;
+  }
+  /* Holiday strips — same overlay role as weekend pattern but for irregular dates,
+     so they're rendered as individual divs from JS. Slightly red-tinted. */
+  .gantt-cell .holiday-strip {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: rgba(255,69,58,0.10);
+    z-index: 5;
+    pointer-events: none;
+  }
+  .gantt-cell .grid-bg {
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(to right, var(--fc-line-ink) 1px, transparent 1px);
+    background-size: calc(var(--day-w) * 7) 100%;
+    pointer-events: none;
+    opacity: 0.6;
+  }
+  .gantt-cell .today-line {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 1.5px;
+    background: var(--fc-accent);
+    opacity: 0.6;
+    pointer-events: none;
+    box-shadow: 0 0 6px rgba(94,106,210,0.55);
+  }
+  .gantt-bar {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 18px;
+    border-radius: var(--fc-r-sm);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    font-size: 10.5px;
+    font-weight: 600;
+    overflow: hidden;
+    white-space: nowrap;
+    cursor: default;
+    backdrop-filter: blur(8px) saturate(160%);
+    -webkit-backdrop-filter: blur(8px) saturate(160%);
+    box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.04), 0 2px 6px rgba(0,0,0,0.4);
+    letter-spacing: -0.005em;
+  }
+  .gantt-bar.not-started {
+    background: rgba(138,143,152,0.22);
+    border: 1px solid rgba(138,143,152,0.4);
+    color: var(--fc-ink-2);
+  }
+  .gantt-bar.in-progress {
+    background: rgba(94,106,210,0.55);
+    border: 1px solid rgba(94,106,210,0.75);
+    color: #fff;
+  }
+  .gantt-bar.completed {
+    background: rgba(39,166,68,0.45);
+    border: 1px solid rgba(39,166,68,0.65);
+    color: #d8f5e0;
+  }
+  .gantt-bar.blocked {
+    background: rgba(229,72,77,0.45);
+    border: 1px solid rgba(229,72,77,0.65);
+    color: #fff;
+  }
+  .gantt-bar.on-hold {
+    background: rgba(209,139,42,0.42);
+    border: 1px solid rgba(209,139,42,0.6);
+    color: #fbe9c8;
+  }
+  .gantt-bar.level-1 { height: 22px; font-weight: 600; }
+
+  /* Level-distinguishing left border accent — subtle hint about hierarchy depth
+     so summary parents read as "containers" for their children's bars. */
+  .gantt-bar.lv-1 { box-shadow: inset 4px 0 0 0 rgba(94,106,210,0.95),  inset 0 1px 0 0 rgba(255,255,255,0.04), 0 2px 6px rgba(0,0,0,0.4); }
+  .gantt-bar.lv-2 { box-shadow: inset 3px 0 0 0 rgba(48,209,88,0.85),   inset 0 1px 0 0 rgba(255,255,255,0.04), 0 2px 6px rgba(0,0,0,0.4); }
+  .gantt-bar.lv-3 { box-shadow: inset 2px 0 0 0 rgba(191,90,242,0.85),  inset 0 1px 0 0 rgba(255,255,255,0.04), 0 2px 6px rgba(0,0,0,0.4); }
+  .gantt-bar.lv-4 { box-shadow: inset 2px 0 0 0 rgba(255,159,10,0.85),  inset 0 1px 0 0 rgba(255,255,255,0.04), 0 2px 6px rgba(0,0,0,0.4); }
+
+  /* Summary / derived bar — used when the parent's own dates are empty and the
+     range was rolled up from its sub-tasks. Striped fill + thicker border so
+     it visually reads as "container, not user-set". */
+  .gantt-bar.derived {
+    background-color: transparent !important;
+    background-image: repeating-linear-gradient(
+      45deg,
+      rgba(255,255,255,0.10) 0,
+      rgba(255,255,255,0.10) 3px,
+      transparent 3px,
+      transparent 7px
+    ) !important;
+    border-width: 1.5px;
+    border-style: dashed;
+    color: var(--fc-ink) !important;
+    font-style: italic;
+  }
+  .gantt-bar.derived.in-progress { border-color: var(--fc-accent); }
+  .gantt-bar.derived.completed   { border-color: var(--fc-success); }
+  .gantt-bar.derived.blocked     { border-color: var(--fc-danger); }
+  .gantt-bar.derived.on-hold     { border-color: var(--fc-warn); }
+  .gantt-bar.derived.not-started { border-color: rgba(134,134,139,0.7); }
+
+  /* Empty state */
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--fc-ink-3);
+    padding: 56px;
+    text-align: center;
+  }
+  .empty .icon {
+    font-size: 56px;
+    margin-bottom: 20px;
+    background: linear-gradient(135deg, var(--fc-accent), var(--fc-purple));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    opacity: 0.85;
+  }
+  .empty h2 {
+    font-family: var(--fc-font-display);
+    font-weight: 800;
+    font-size: 26px;
+    margin-bottom: 10px;
+    color: var(--fc-ink);
+    letter-spacing: -0.022em;
+  }
+  .empty p {
+    font-size: 13.5px;
+    line-height: 1.65;
+    max-width: 380px;
+    margin-bottom: 28px;
+    color: var(--fc-ink-2);
+  }
+
+  #fileImport { display: none; }
+
+  /* ───── Import mapping modal (Linear dark theme) ───── */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(10, 12, 18, 0.7);  /* soft dark-grey scrim, matches canvas tone */
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+    animation: modal-fade .18s ease-out;
+  }
+  @keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+  .modal-card {
+    position: relative;  /* anchor for the absolute close button */
+    background: var(--fc-surface);
+    border: 1px solid var(--fc-line);
+    border-radius: var(--fc-r-lg);
+    padding: 22px 26px;
+    width: 92%;
+    max-width: 780px;
+    max-height: 84vh;
+    overflow-y: auto;
+    box-shadow: var(--fc-shadow-pop);
+    color: var(--fc-ink);
+    font-family: var(--fc-font-body);
+  }
+  .modal-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--fc-r-sm);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--fc-ink-3);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .12s, color .12s, border-color .12s;
+  }
+  .modal-close:hover {
+    background: var(--fc-elev);
+    color: var(--fc-ink);
+    border-color: var(--fc-line);
+  }
+  .modal-close:focus-visible {
+    outline: none;
+    border-color: var(--fc-accent);
+    box-shadow: 0 0 0 3px var(--fc-accent-2);
+  }
+  .modal-card h2 {
+    font-family: var(--fc-font-display);
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+    color: var(--fc-ink);
+  }
+  .modal-hint {
+    font-size: 12px;
+    color: var(--fc-ink-2);
+    line-height: 1.55;
+    margin-bottom: 16px;
+  }
+  .modal-field {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 12px;
+  }
+  .modal-field label {
+    font-size: 10px;
+    color: var(--fc-ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+    min-width: 80px;
+  }
+  .modal-field select {
+    flex: 1;
+    padding: 6px 10px;
+    background: var(--fc-elev);
+    border: 1px solid var(--fc-line);
+    border-radius: var(--fc-r-sm);
+    font-family: var(--fc-font-body);
+    font-size: 12px;
+    color: var(--fc-ink);
+  }
+  .modal-field select:focus,
+  .map-grid select:focus {
+    outline: none;
+    border-color: var(--fc-accent);
+    box-shadow: 0 0 0 3px var(--fc-accent-2);
+  }
+  .map-section-title {
+    font-size: 10px;
+    color: var(--fc-ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    margin: 16px 0 8px;
+  }
+  .map-grid {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 6px 14px;
+    margin-bottom: 14px;
+  }
+  .map-target {
+    font-size: 12px;
+    color: var(--fc-ink);
+    font-weight: 500;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .map-target .req {
+    color: var(--fc-danger);
+    font-weight: 700;
+  }
+  .map-grid select {
+    padding: 5px 9px;
+    background: var(--fc-elev);
+    border: 1px solid var(--fc-line);
+    border-radius: var(--fc-r-sm);
+    font-family: var(--fc-font-mono);
+    font-size: 11px;
+    color: var(--fc-ink);
+    width: 100%;
+  }
+  .preview-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 11px;
+    border: 1px solid var(--fc-line);
+    border-radius: var(--fc-r-sm);
+    overflow: hidden;
+    background: var(--fc-surface);
+  }
+  .preview-table th, .preview-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--fc-line);
+    border-right: 1px solid var(--fc-line);
+    text-align: left;
+    font-family: var(--fc-font-mono);
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .preview-table th:last-child, .preview-table td:last-child { border-right: none; }
+  .preview-table tr:last-child td { border-bottom: none; }
+  .preview-table th {
+    background: var(--fc-elev);
+    color: var(--fc-ink-3);
+    font-weight: 700;
+    font-family: var(--fc-font-body);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .preview-table td {
+    background: transparent;
+    color: var(--fc-ink-2);
+  }
+  .modal-actions {
+    display: flex; justify-content: flex-end; gap: 10px;
+    padding-top: 16px;
+    margin-top: 14px;
+    border-top: 1px solid var(--fc-line);
+  }
+
+  /* ───── Export popover ───── */
+  .export-wrap { position: relative; display: inline-flex; }
+  .export-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 180px;
+    background: var(--fc-surface);
+    border: 1px solid var(--fc-line);
+    border-radius: var(--fc-r-md);
+    box-shadow: var(--fc-shadow-pop);
+    padding: 6px;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .export-menu[hidden] { display: none; }
+  .export-menu button {
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--fc-ink);
+    font-family: var(--fc-font-body);
+    font-size: 12px;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: var(--fc-r-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    transition: background .12s, border-color .12s;
+  }
+  .export-menu button:hover {
+    background: var(--fc-elev);
+    border-color: var(--fc-line);
+  }
+  .export-menu button .hint { color: var(--fc-ink-3); font-family: var(--fc-font-mono); font-size: 10.5px; }
+
+  /* ───── Print stylesheet (PDF export) ───── */
+  @media print {
+    @page { size: A4; margin: 16mm; }
+    html, body { overflow: visible !important; height: auto !important; background: #fff !important; color: #111 !important; }
+    body { font-size: 12px; }
+    /* Hide all interactive chrome — print only the .pdf-report content. */
+    .topbar, .toolbar, .wbs, .modal-backdrop, .main { display: none !important; }
+    .pdf-report {
+      display: block !important;
+      color: #111;
+      background: #fff;
+    }
+    .pdf-report h1 { font-size: 20px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.02em; }
+    .pdf-report .meta { font-size: 11px; color: #666; margin-bottom: 16px; }
+    /* Cover page — a full-page hero showing just the project name and export date,
+       followed by a forced page break so the report content starts on page 2. */
+    .pdf-cover {
+      page-break-after: always;
+      break-after: page;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0 12mm;
+    }
+    .pdf-cover .label {
+      font-size: 12px;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: #888;
+      margin-bottom: 28px;
+      font-weight: 600;
+    }
+    .pdf-cover .name {
+      font-size: 44px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #111;
+      line-height: 1.2;
+      max-width: 160mm;
+    }
+    .pdf-cover .rule {
+      width: 64mm;
+      height: 2px;
+      background: #111;
+      margin: 32px 0;
+    }
+    .pdf-cover .date {
+      font-size: 13px;
+      color: #444;
+      font-variant-numeric: tabular-nums;
+    }
+    .pdf-report h2 { font-size: 14px; font-weight: 700; margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #ddd; }
+    .pdf-report .pdf-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .pdf-report .pdf-card { border: 1px solid #ddd; border-radius: 6px; padding: 10px 12px; }
+    .pdf-report .pdf-card .lbl { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; }
+    .pdf-report .pdf-card .val { font-size: 22px; font-weight: 700; margin-top: 4px; letter-spacing: -0.02em; }
+    .pdf-report .pdf-card .sub { font-size: 10px; color: #777; margin-top: 2px; }
+    .pdf-report .pdf-card.danger .val { color: #c0312e; }
+    .pdf-report table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .pdf-report th, .pdf-report td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; vertical-align: top; }
+    .pdf-report th { background: #f3f3f3; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .pdf-report td.num, .pdf-report th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .pdf-report td.delay { color: #c0312e; font-weight: 600; }
+    .pdf-report tr { page-break-inside: avoid; }
+  }
+  /* Hidden in screen view — only the print stylesheet shows it. */
+  .pdf-report { display: none; }
+
+  /* ───── Report view ───── */
+  body[data-view="report"] .toolbar { display: none; }
+  body[data-view="report"] #btnAddRoot,
+  body[data-view="report"] #btnImport,
+  body[data-view="report"] .export-wrap { display: none; }
+
+  .report-wrap {
+    padding: 22px 26px 40px;
+    overflow: auto;
+    height: 100%;
+    color: var(--fc-ink);
+  }
+  .report-wrap h2 {
+    font-family: var(--fc-font-display);
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fc-ink-3);
+    margin: 0 0 12px;
+  }
+  .report-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-bottom: 26px;
+  }
+  .report-card {
+    padding: 16px 18px;
+    border-radius: var(--fc-r-md);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--fc-line);
+    box-shadow: var(--fc-shadow-card);
+  }
+  .report-card .label {
+    font-size: 11px;
+    color: var(--fc-ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+  }
+  .report-card .value {
+    font-family: var(--fc-font-display);
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--fc-ink);
+    margin-top: 6px;
+    line-height: 1.1;
+  }
+  .report-card .sub {
+    margin-top: 4px;
+    font-size: 11px;
+    font-family: var(--fc-font-mono);
+    color: var(--fc-ink-3);
+  }
+  .report-card.accent .value { color: var(--fc-accent-text); }
+  .report-card .bar {
+    margin-top: 10px;
+    height: 6px;
+    background: rgba(255,255,255,0.06);
+    border-radius: var(--fc-r-pill);
+    overflow: hidden;
+  }
+  .report-card .bar > i {
+    display: block;
+    height: 100%;
+    background: var(--fc-accent);
+    border-radius: inherit;
+    transition: width .25s;
+  }
+
+  .report-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: rgba(255,255,255,0.04);
+    border-radius: var(--fc-r-md);
+    overflow: hidden;
+    border: 1px solid var(--fc-line);
+    box-shadow: var(--fc-shadow-card);
+  }
+  .report-table th,
+  .report-table td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--fc-line-ink);
+    font-size: 12.5px;
+  }
+  .report-table th {
+    background: rgba(255,255,255,0.04);
+    font-size: 10px;
+    color: var(--fc-ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+  }
+  .report-table td.num,
+  .report-table th.num {
+    text-align: right;
+    font-family: var(--fc-font-mono);
+  }
+  .report-table tbody tr:last-child td { border-bottom: 0; }
+  .report-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
+  .report-table .delay-cell { color: var(--fc-danger); font-weight: 600; }
+  .report-table .pct-cell { width: 180px; }
+  .report-table .pct-bar {
+    display: inline-block;
+    width: 100px;
+    height: 6px;
+    background: rgba(255,255,255,0.06);
+    border-radius: var(--fc-r-pill);
+    overflow: hidden;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+  .report-table .pct-bar > i {
+    display: block;
+    height: 100%;
+    background: var(--fc-accent);
+    border-radius: inherit;
+  }
+  .report-note {
+    margin-top: 14px;
+    font-size: 11px;
+    color: var(--fc-ink-3);
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar" data-fc-glass>
+  <span class="logo"><span class="dot">◆</span> WBS</span>
+  <input id="projectName" class="project-name" value="새 프로젝트" />
+  <span class="save-status" id="saveStatus"></span>
+  <span class="spacer"></span>
+  <button class="top-btn primary" id="btnAddRoot">＋ Level 1 업무</button>
+  <button class="top-btn" id="btnReport">📊 Report</button>
+  <button class="top-btn" id="btnImport">⤓ Import</button>
+  <div class="export-wrap">
+    <button class="top-btn" id="btnExport" aria-haspopup="menu" aria-expanded="false">⤒ Export</button>
+    <div class="export-menu" id="exportMenu" role="menu" hidden>
+      <button type="button" role="menuitem" data-fmt="xlsx">Excel <span class="hint">(.xlsx)</span></button>
+      <button type="button" role="menuitem" data-fmt="json">JSON <span class="hint">(.json)</span></button>
+      <button type="button" role="menuitem" data-fmt="pdf">PDF <span class="hint">(print dialog)</span></button>
+    </div>
+  </div>
+  <input type="file" id="fileImport" accept=".json,.xlsx" />
+</header>
+
+<div class="main" data-fc-glass>
+  <div class="toolbar">
+    <span class="stat">Tasks <span class="v" id="statCount">0</span></span>
+    <button type="button" class="stat stat-btn" data-status-filter="completed">완료 <span class="v" id="statDone">0</span></button>
+    <button type="button" class="stat stat-btn" data-status-filter="in-progress">진행중 <span class="v" id="statInProg">0</span></button>
+    <button type="button" class="stat stat-btn" data-status-filter="delayed" id="statDelayed" style="display:none;">지연 <span class="v" id="statDelayedV">0</span></button>
+    <span class="stat" id="statDateRange" style="display:none;">기간 <span class="v" id="statDateRangeV"></span></span>
+    <span class="assignee-filter" id="assigneeFilterWrap">
+      <span class="icon">🔎</span>
+      <input id="assigneeFilter" type="text" placeholder="담당자 필터" autocomplete="off" />
+      <span class="count" id="assigneeFilterCount"></span>
+      <button id="assigneeFilterClear" type="button" title="필터 지우기">×</button>
+    </span>
+    <span class="zoom">
+      <button data-zoom="14">조밀</button>
+      <button data-zoom="18" class="active">표준</button>
+      <button data-zoom="26">넓게</button>
+      <button data-zoom="36">상세</button>
+    </span>
+  </div>
+  <div class="wbs" id="wbs"></div>
+</div>
+
+<script>
+"use strict";
+
+//============ Constants ============
+const STORAGE_KEY = "k-wbs.project.current";
+const WBS_COLWIDTHS_KEY = "k-wbs.col-widths";
+
+// Resizable data columns (NOT the Gantt — that one stays `1fr` flex).
+// `cssVar` maps to the CSS custom property used by .grid-row's grid-template-columns.
+const RESIZABLE_COLUMNS = [
+  { key: "name",     cssVar: "--col-name-w",     label: "업무명",   min: 160, default: 320 },
+  { key: "rfp",      cssVar: "--col-rfp-w",      label: "RFP No.", min: 60,  default: 96  },
+  { key: "assignee", cssVar: "--col-assignee-w", label: "담당자",  min: 60,  default: 108 },
+  { key: "deliv",    cssVar: "--col-deliv-w",    label: "산출물",  min: 80,  default: 144 },
+  { key: "status",   cssVar: "--col-status-w",   label: "상태",    min: 80,  default: 116 },
+  { key: "progress", cssVar: "--col-progress-w", label: "진행률",  min: 70,  default: 96  },
+  { key: "start",    cssVar: "--col-start-w",    label: "시작일",  min: 90,  default: 124 },
+  { key: "end",      cssVar: "--col-end-w",      label: "완료일",  min: 90,  default: 124 },
+];
+
+function loadColumnWidths() {
+  try {
+    const raw = localStorage.getItem(WBS_COLWIDTHS_KEY);
+    if (!raw) return;
+    const stored = JSON.parse(raw);
+    for (const col of RESIZABLE_COLUMNS) {
+      const w = parseInt(stored[col.key]);
+      if (Number.isFinite(w) && w >= col.min) {
+        document.documentElement.style.setProperty(col.cssVar, w + "px");
+      }
+    }
+  } catch { /* ignore corrupt storage */ }
+}
+
+function saveColumnWidth(key, widthPx) {
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(WBS_COLWIDTHS_KEY) || "{}"); } catch {}
+  stored[key] = widthPx;
+  localStorage.setItem(WBS_COLWIDTHS_KEY, JSON.stringify(stored));
+}
+
+// Install a drag handle on a header cell that resizes its column via the matching CSS var.
+function attachColumnResizer(cellEl, col) {
+  const handle = el("div", { class: "col-resize", title: `${col.label} 너비 조절` });
+  handle.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const cs = getComputedStyle(document.documentElement);
+    const startW = parseInt(cs.getPropertyValue(col.cssVar)) || col.default;
+    document.body.setAttribute("data-col-resizing", col.key);
+
+    const onMove = (ev) => {
+      const next = Math.max(col.min, startW + (ev.clientX - startX));
+      document.documentElement.style.setProperty(col.cssVar, next + "px");
+      // If this column is pinned, downstream pinned columns' sticky-left depends on its width.
+      if (colSelection.has(col.key)) recomputeStickyOffsets();
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.removeAttribute("data-col-resizing");
+      const finalW = parseInt(getComputedStyle(document.documentElement).getPropertyValue(col.cssVar)) || col.default;
+      saveColumnWidth(col.key, finalW);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+  // Double-click to reset to default.
+  handle.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    document.documentElement.style.setProperty(col.cssVar, col.default + "px");
+    saveColumnWidth(col.key, col.default);
+  });
+  cellEl.appendChild(handle);
+}
+
+// Column selection — header click pins that column to the left during horizontal scroll
+// (CSS `position: sticky`), Shift+click toggles into a multi-set. Each pinned column's
+// sticky-left offset = sum of widths of all previously-pinned columns (in natural order),
+// so a non-contiguous pin like {A, C} pulls C up against A once the scroll has carried
+// the unpinned B underneath. Selection lives in memory only.
+const colSelection = new Set();
+
+function currentColumnWidth(col) {
+  const cs = getComputedStyle(document.documentElement);
+  return parseInt(cs.getPropertyValue(col.cssVar)) || col.default;
+}
+
+function recomputeStickyOffsets() {
+  const root = document.documentElement;
+  let acc = 0;
+  for (const col of RESIZABLE_COLUMNS) {
+    const varName = `--sticky-left-${col.key}`;
+    if (colSelection.has(col.key)) {
+      root.style.setProperty(varName, acc + "px");
+      acc += currentColumnWidth(col);
+    } else {
+      root.style.removeProperty(varName);
+    }
+  }
+}
+
+function applyColSelection() {
+  recomputeStickyOffsets();
+  const wbs = document.getElementById("wbs");
+  if (!wbs) return;
+  wbs.querySelectorAll("[data-col-key]").forEach(node => {
+    node.classList.toggle("col-pinned", colSelection.has(node.dataset.colKey));
+  });
+}
+
+function toggleColSelection(key, additive) {
+  if (additive) {
+    if (colSelection.has(key)) colSelection.delete(key);
+    else colSelection.add(key);
+  } else {
+    const onlyThis = colSelection.size === 1 && colSelection.has(key);
+    colSelection.clear();
+    if (!onlyThis) colSelection.add(key);
+  }
+  applyColSelection();
+}
+
+function attachColumnSelector(cellEl, col) {
+  cellEl.dataset.colKey = col.key;
+  cellEl.addEventListener("click", (e) => {
+    // Clicks that originated on the resize handle shouldn't toggle pinning.
+    if (e.target.classList && e.target.classList.contains("col-resize")) return;
+    toggleColSelection(col.key, e.shiftKey);
+  });
+}
+
+// Row selection — click a task row to select it, Shift+click to toggle into a multi-set.
+// State lives in memory only (not persisted); rows already carry data-task-id from
+// renderTaskRow, so we just flip the `.row-selected` class without re-rendering.
+const rowSelection = new Set();
+
+function applyRowSelection() {
+  const root = document.getElementById("wbs");
+  if (!root) return;
+  root.querySelectorAll(".task-row[data-task-id]").forEach(node => {
+    node.classList.toggle("row-selected", rowSelection.has(node.dataset.taskId));
+  });
+}
+
+function toggleRowSelection(id, additive) {
+  if (additive) {
+    if (rowSelection.has(id)) rowSelection.delete(id);
+    else rowSelection.add(id);
+  } else {
+    const onlyThis = rowSelection.size === 1 && rowSelection.has(id);
+    rowSelection.clear();
+    if (!onlyThis) rowSelection.add(id);
+  }
+  applyRowSelection();
+}
+
+// Cells contain inputs/buttons users need to interact with normally. Treat clicks on those
+// (and the row's own action buttons / disclosure toggle) as edits, not row selection.
+const ROW_CLICK_PASSTHRU = "input, select, textarea, button, [contenteditable], .toggle, .col-resize, a";
+
+function attachRowSelector(rowEl, taskId) {
+  // mousedown — not click — because Shift+click would otherwise start a text selection
+  // before our click handler runs. preventDefault on mousedown stops that, and we
+  // also clear any range the browser had started building from a prior anchor.
+  rowEl.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return; // left button only
+    if (e.target.closest && e.target.closest(ROW_CLICK_PASSTHRU)) return;
+    if (e.shiftKey) {
+      e.preventDefault();
+      const sel = window.getSelection();
+      if (sel) sel.removeAllRanges();
+    }
+    toggleRowSelection(taskId, e.shiftKey);
+  });
+}
+const SCHEMA_VERSION = "0.1";
+const STATUS_OPTIONS = [
+  { value: "not-started", label: "대기" },
+  { value: "in-progress", label: "진행중" },
+  { value: "completed",   label: "완료" },
+  { value: "blocked",     label: "차단" },
+  { value: "on-hold",     label: "보류" },
+];
+const STATUS_LABEL = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s.label]));
+const STATUS_VALUE_BY_LABEL = Object.fromEntries(STATUS_OPTIONS.map(s => [s.label, s.value]));
+
+// Canonical Excel column order — drives both export AND import validation.
+// A sheet is considered "WBS-format" if its header row contains all of these column names.
+const EXCEL_HEADERS = ["Level", "WBS", "RFP No.", "담당자", "산출물", "상태", "진행률", "시작일", "완료일"];
+
+//============ State ============
+const state = {
+  project: null,
+  view: "wbs",          // "wbs" | "report" — ephemeral UI state, not persisted
+  filter: { assignee: "", status: "all" }, // assignee + status filters — ephemeral UI state, not persisted
+  listeners: new Set(),
+};
+
+function emit() { state.listeners.forEach(fn => { try { fn(); } catch (e) { console.error(e); } }); }
+function subscribe(fn) { state.listeners.add(fn); return () => state.listeners.delete(fn); }
+
+let saveTimer = null;
+function saveSoon() {
+  $("#saveStatus").textContent = "saving…";
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.project));
+    $("#saveStatus").textContent = "saved";
+    setTimeout(() => { if ($("#saveStatus").textContent === "saved") $("#saveStatus").textContent = ""; }, 1200);
+  }, 400);
+}
+
+function loadProject() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const proj = JSON.parse(raw);
+    if (proj && Array.isArray(proj.tasks)) normalizeHierarchy(proj.tasks);
+    return proj;
+  } catch { return null; }
+}
+
+// Repair task.parent_id for orphans created by older imports — for each task with
+// level > 1, ensure its parent_id points at an existing ancestor task. If it doesn't
+// (null, missing, or out-of-tree), re-link to the most recent earlier task at any
+// lower level. This lets parent-status rollup (effectiveStatus) work on legacy data.
+// Mutates `tasks` in place.
+function normalizeHierarchy(tasks) {
+  const idSet = new Set(tasks.map(t => t.id));
+  const lastAtLevel = {};
+  let repaired = 0;
+  for (const t of tasks) {
+    const lv = Number.isFinite(t.level) ? t.level : 1;
+    const needsRepair = lv > 1 && (t.parent_id == null || !idSet.has(t.parent_id));
+    if (needsRepair) {
+      let newParent = null;
+      for (let k = lv - 1; k >= 1; k--) {
+        if (lastAtLevel[k]) { newParent = lastAtLevel[k]; break; }
+      }
+      if (newParent !== t.parent_id) { t.parent_id = newParent; repaired++; }
+    }
+    lastAtLevel[lv] = t.id;
+    for (let k = lv + 1; k <= 4; k++) delete lastAtLevel[k];
+  }
+  if (repaired) console.info(`[k-wbs] normalized ${repaired} orphan task(s) — parent_id was missing or invalid`);
+}
+
+function newProject(name) {
+  return {
+    version: SCHEMA_VERSION,
+    name: name || "새 프로젝트",
+    tasks: [],
+  };
+}
+
+//============ Task helpers ============
+function genId() { return "t-" + Math.random().toString(36).slice(2, 9); }
+
+function findTask(id) {
+  return state.project.tasks.find(t => t.id === id);
+}
+
+function childrenOf(parentId) {
+  return state.project.tasks.filter(t => t.parent_id === parentId);
+}
+
+function descendantsOf(id) {
+  const out = [];
+  const stack = [id];
+  while (stack.length) {
+    const pid = stack.pop();
+    for (const t of state.project.tasks) {
+      if (t.parent_id === pid) { out.push(t); stack.push(t.id); }
+    }
+  }
+  return out;
+}
+
+function hasChildren(id) {
+  return state.project.tasks.some(t => t.parent_id === id);
+}
+
+// Effective status — leaves use their own user-set value; parents are auto-summarised
+// from ALL descendants (leaves + intermediates) + self by priority:
+//   1) every leaf-descendant completed   → completed
+//   2) any descendant in-progress        → in-progress   (catches intermediate L2/L3
+//                                                         marked active even if their
+//                                                         own deeper leaves haven't been
+//                                                         touched yet)
+//   3) any descendant blocked            → blocked
+//   4) any descendant on-hold            → on-hold
+//   5) MIXED: some completed but not all → in-progress   (work has started under this
+//                                                         parent, so it's no longer 대기)
+//   6) otherwise                         → not-started
+// Status pills + gantt bar color + filters + stats all read this so the rollup is
+// consistent across the WBS, Report, and the toolbar count buttons.
+function effectiveStatus(t) {
+  if (!hasChildren(t.id)) return t.status;
+  const desc = descendantsOf(t.id);
+  if (!desc.length) return t.status;
+  // "All completed" still measured against leaves only — intermediates' stored status
+  // isn't authoritative for completion, since their children might still be open.
+  const leaves = desc.filter(d => !hasChildren(d.id));
+  if (leaves.length && leaves.every(d => d.status === "completed")) return "completed";
+  // Activity signals propagate from anywhere in the subtree INCLUDING SELF — so an
+  // intermediate node that's explicitly marked active reads as active itself, not just
+  // its ancestors. Without including self, B-L3 (stored=in-progress) would show as
+  // not-started while its parents B-L2/B-L1 paradoxically showed in-progress.
+  const someActive = (s) => t.status === s || desc.some(d => d.status === s);
+  if (someActive("in-progress")) return "in-progress";
+  if (someActive("blocked"))     return "blocked";
+  if (someActive("on-hold"))     return "on-hold";
+  // Mixed-progress fallthrough — if any leaf is completed (work has begun) but not all
+  // are, the parent is "in-progress" rather than "not-started". User expectation: a
+  // parent shouldn't read as 대기 when its children clearly have work done.
+  if (someActive("completed")) return "in-progress";
+  return "not-started";
+}
+
+function addTask(parentId, seed = {}) {
+  const parent = parentId ? findTask(parentId) : null;
+  const level = parent ? Math.min(4, parent.level + 1) : 1;
+  const status = seed.status || "not-started";
+  const task = {
+    id: genId(),
+    parent_id: parentId || null,
+    level,
+    name: seed.name || (parentId ? `${parent.name} - 하위 업무` : `Level 1 업무 ${(state.project.tasks.filter(t => !t.parent_id).length + 1)}`),
+    rfp_no: seed.rfp_no || "",
+    assignee: seed.assignee || "",
+    deliverable: seed.deliverable || "",
+    status,
+    progress: seed.progress != null ? clampProgress(seed.progress) : progressForStatus(status, 0),
+    start_date: seed.start_date || "",
+    end_date: seed.end_date || "",
+    expanded: true,
+  };
+  state.project.tasks.push(task);
+  if (parent) parent.expanded = true;
+  emit(); saveSoon();
+  return task;
+}
+
+// Progress is 0-100 integer. Status drives whether it's editable AND its forced value:
+//   not-started → 0    (frozen)
+//   completed   → 100  (frozen)
+//   in-progress → editable
+//   blocked/on-hold → keep current value (frozen at whatever was achieved)
+function clampProgress(v) {
+  const n = parseInt(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+function progressForStatus(status, current) {
+  if (status === "not-started") return 0;
+  if (status === "completed")   return 100;
+  return clampProgress(current);
+}
+function isProgressEditable(status) {
+  return status === "in-progress";
+}
+
+function deleteTask(id) {
+  const all = [id, ...descendantsOf(id).map(t => t.id)];
+  const set = new Set(all);
+  state.project.tasks = state.project.tasks.filter(t => !set.has(t.id));
+  emit(); saveSoon();
+}
+
+function updateTask(id, patch) {
+  const t = findTask(id);
+  if (!t) return;
+  Object.assign(t, patch);
+  // If status changed, normalize progress: not-started → 0, completed → 100.
+  // blocked/on-hold keep whatever value the task had (frozen mid-progress).
+  if (patch.status !== undefined) {
+    t.progress = progressForStatus(t.status, t.progress);
+  }
+  if (patch.progress !== undefined) {
+    t.progress = clampProgress(t.progress);
+  }
+  emit(); saveSoon();
+}
+
+// Split an assignee cell string into individual names. Supports the common Korean/English
+// delimiters users actually type: comma (half/full-width), semicolon, slash, pipe,
+// ampersand, middle-dot, Japanese enumeration comma, and newline.
+function parseAssignees(s) {
+  if (!s) return [];
+  return s.split(/[,;\/|&·,、\n]+/).map(x => x.trim()).filter(Boolean);
+}
+
+// Substring match (case-insensitive) against any parsed name in the assignee cell.
+// So filter "철수" matches a task whose assignee is "김철수, 이영희".
+function matchesAssigneeFilter(t, q) {
+  if (!q) return true;
+  const ql = q.toLowerCase();
+  return parseAssignees(t.assignee).some(name => name.toLowerCase().includes(ql));
+}
+
+// Test whether a single task matches the active status filter.
+// `delayed` is a derived state covering both overdue and late-start (see delayInfo).
+function matchesStatusFilter(t, statusFilter, today) {
+  if (!statusFilter || statusFilter === "all") return true;
+  if (statusFilter === "delayed") return !!delayInfo(t, today);
+  return effectiveStatus(t) === statusFilter;
+}
+
+// Build the set of task ids to include when ANY filter is active: every directly-matching
+// task plus all of its ancestors, so the matching rows remain reachable in the tree.
+// Returns null when no filter is active (caller treats null = "show everything").
+function computeFilterIncludeSet() {
+  const q = (state.filter && state.filter.assignee) || "";
+  const statusFilter = (state.filter && state.filter.status) || "all";
+  if (!q && statusFilter === "all") return null;
+
+  const today = todayUTC();
+  const direct = new Set();
+  for (const t of state.project.tasks) {
+    if (q && !matchesAssigneeFilter(t, q)) continue;
+    if (!matchesStatusFilter(t, statusFilter, today)) continue;
+    direct.add(t.id);
+  }
+  if (!direct.size) return direct;
+  const include = new Set(direct);
+  for (const id of direct) {
+    let cur = findTask(id);
+    while (cur && cur.parent_id && !include.has(cur.parent_id)) {
+      include.add(cur.parent_id);
+      cur = findTask(cur.parent_id);
+    }
+  }
+  return include;
+}
+
+// Visible task ordering: preorder traversal, respecting parent's expanded flag.
+// When any filter is active, only included tasks are emitted and traversal descends
+// regardless of `expanded` so matches aren't hidden under collapsed parents.
+function visibleTasks() {
+  const out = [];
+  const includeSet = computeFilterIncludeSet();
+  const walk = (parentId) => {
+    const children = childrenOf(parentId);
+    for (const t of children) {
+      if (includeSet && !includeSet.has(t.id)) continue;
+      out.push(t);
+      if (includeSet || t.expanded !== false) walk(t.id);
+    }
+  };
+  walk(null);
+  return out;
+}
+
+//============ Date helpers ============
+const MS_PER_DAY = 86400000;
+
+function parseDate(s) {
+  if (!s) return null;
+  // expected YYYY-MM-DD
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const d = new Date(Date.UTC(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3])));
+  return isNaN(d) ? null : d;
+}
+function fmtDateISO(d) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function fmtDateShort(d) {
+  return `${d.getUTCMonth() + 1}.${d.getUTCDate()}`;
+}
+function dayDiff(a, b) { return Math.round((b - a) / MS_PER_DAY); }
+function addDays(d, n) { return new Date(d.getTime() + n * MS_PER_DAY); }
+
+function todayUTC() {
+  const n = new Date();
+  return new Date(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()));
+}
+
+// Compute effective date range: explicit on task, OR aggregated from descendants for parents.
+// Returns { start, end, derived } where `derived` is true if either bound was
+// rolled up from descendant tasks (parent summary). This flag drives the Gantt
+// bar styling so users can tell user-set bars from auto-summary bars at a glance.
+function taskDateRange(t) {
+  const sOwn = parseDate(t.start_date);
+  const eOwn = parseDate(t.end_date);
+  if (sOwn && eOwn) return { start: sOwn, end: eOwn, derived: false };
+  // Roll up: earliest descendant start, latest descendant end.
+  const desc = descendantsOf(t.id);
+  let ds = null, de = null;
+  for (const d of desc) {
+    const ps = parseDate(d.start_date);
+    const pe = parseDate(d.end_date);
+    if (ps && (!ds || ps < ds)) ds = ps;
+    if (pe && (!de || pe > de)) de = pe;
+  }
+  const start = sOwn || ds;
+  const end   = eOwn || de;
+  const derived = (!sOwn && !!ds) || (!eOwn && !!de);
+  return { start, end, derived };
+}
+
+// Classify a task as delayed against today. Two categories:
+//   overdue    — end date has passed but the task isn't completed
+//   late-start — start date has passed but the task is still "not-started"
+// Tasks with status "completed" are never flagged. Parents with derived dates inherit
+// the delay (their derived end is past iff at least one descendant's end is past).
+function delayInfo(t, today) {
+  const eff = effectiveStatus(t);
+  if (eff === "completed") return null;
+  const { start, end } = taskDateRange(t);
+  if (end && end < today) {
+    return { type: "overdue", days: dayDiff(end, today) };
+  }
+  if (start && start < today && eff === "not-started") {
+    return { type: "late-start", days: dayDiff(start, today) };
+  }
+  return null;
+}
+
+// Raw earliest-start / latest-end across the given tasks — no padding, no defaults.
+// Either bound may be null if no task in the set has that side of a date.
+// This is the "real" project span used for workday counts (WBS stat, Report cards),
+// so the numbers reflect actual planned work, not gantt visual breathing room.
+function projectDateRangeRaw(tasks = state.project.tasks) {
+  let min = null, max = null;
+  for (const t of tasks) {
+    const { start, end } = taskDateRange(t);
+    if (start && (!min || start < min)) min = start;
+    if (end   && (!max || end   > max)) max = end;
+  }
+  return { start: min, end: max };
+}
+
+// Gantt-visualization range: like the raw range but with a 60-day window fallback when
+// no dates exist, missing-side defaults, and a few days of padding on each side so bars
+// don't render flush against the axis edges.
+function projectDateRange(tasks = state.project.tasks) {
+  let { start: min, end: max } = projectDateRangeRaw(tasks);
+  const today = todayUTC();
+  if (!min && !max) {
+    min = addDays(today, -7);
+    max = addDays(today, 53);
+  } else {
+    if (!min) min = max ? addDays(max, -30) : today;
+    if (!max) max = min ? addDays(min, 30) : addDays(today, 30);
+    // Pad each side
+    min = addDays(min, -3);
+    max = addDays(max, 7);
+  }
+  return { start: min, end: max };
+}
+
+//============ DOM helpers ============
+function $(sel) { return document.querySelector(sel); }
+function el(tag, attrs, children) {
+  const node = document.createElement(tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null) continue;
+      if (k === "class") node.className = v;
+      else if (k === "style" && typeof v === "object") Object.assign(node.style, v);
+      else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2).toLowerCase(), v);
+      else if (k === "dataset" && typeof v === "object") Object.assign(node.dataset, v);
+      else node.setAttribute(k, v);
+    }
+  }
+  if (children != null) {
+    for (const c of [].concat(children)) {
+      if (c == null || c === false) continue;
+      node.appendChild(typeof c === "string" || typeof c === "number" ? document.createTextNode(String(c)) : c);
+    }
+  }
+  return node;
+}
+
+//============ Render ============
+function render() {
+  $("#projectName").value = state.project.name;
+  document.body.dataset.view = state.view;
+  const reportBtn = $("#btnReport");
+  if (reportBtn) reportBtn.textContent = state.view === "report" ? "← WBS" : "📊 Report";
+  if (state.view === "report") {
+    renderReport();
+  } else {
+    renderToolbar();
+    renderWbs();
+  }
+}
+
+function renderToolbar() {
+  const tasks = state.project.tasks;
+  const q = (state.filter && state.filter.assignee) || "";
+  // Stat counts are measured against LEAF tasks only — parents' derived statuses
+  // would otherwise double-count their already-counted children (e.g., a 完了 L2
+  // whose only leaf is also 完了 would show 2 in 완료). Leaves are the unit of work,
+  // so counting them gives an accurate "X of Y tasks done" reading.
+  // Assignee filter (when set) is applied on the same leaf subset.
+  const isLeafTask = (t) => !hasChildren(t.id);
+  const leafTasksAll = tasks.filter(isLeafTask);
+  const statTasks = q ? leafTasksAll.filter(t => matchesAssigneeFilter(t, q)) : leafTasksAll;
+
+  $("#statCount").textContent = statTasks.length;
+  $("#statDone").textContent = statTasks.filter(t => t.status === "completed").length;
+  $("#statInProg").textContent = statTasks.filter(t => t.status === "in-progress").length;
+
+  // 지연 stat — leaf-only. Hidden when zero so it doesn't add noise to a healthy project.
+  const today = todayUTC();
+  const delayedRows = statTasks.filter(t => delayInfo(t, today)).length;
+  $("#statDelayedV").textContent = delayedRows;
+  $("#statDelayed").style.display = delayedRows ? "" : "none";
+
+  // Reflect the active status filter on the corresponding .stat-btn.
+  const activeStatus = (state.filter && state.filter.status) || "all";
+  document.querySelectorAll(".toolbar .stat-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.statusFilter === activeStatus);
+  });
+
+  // Date range — same subset. Uses the raw (un-padded) project span so the displayed
+  // date pair and 영업일 count reflect the actual planned work, and so the Report view's
+  // "총 투입일" can derive an identical value from the same formula.
+  if (statTasks.some(t => t.start_date || t.end_date)) {
+    const { start, end } = projectDateRangeRaw(statTasks);
+    const wd = (start && end) ? countWorkdays(start, end) : 0;
+    $("#statDateRangeV").textContent = `${fmtDateShort(start)} ~ ${fmtDateShort(end)} (${wd} 영업일)`;
+    $("#statDateRange").style.display = "";
+  } else {
+    $("#statDateRange").style.display = "none";
+  }
+
+  // Assignee filter chip — count shows direct matches / total. Don't overwrite the input
+  // value while user is actively typing (would race the cursor).
+  const wrap = $("#assigneeFilterWrap");
+  const inp = $("#assigneeFilter");
+  const cnt = $("#assigneeFilterCount");
+  if (wrap) wrap.classList.toggle("has-value", !!q);
+  if (inp && document.activeElement !== inp) inp.value = q;
+  if (cnt) cnt.textContent = q ? `${statTasks.length}/${leafTasksAll.length}` : "";
+}
+
+function renderWbs() {
+  const root = $("#wbs");
+  root.innerHTML = "";
+  const tasks = state.project.tasks;
+  if (!tasks.length) {
+    root.appendChild(el("div", { class: "empty" }, [
+      el("div", { class: "icon" }, ["▦"]),
+      el("h2", {}, ["프로젝트가 비어 있습니다"]),
+      el("p", {}, ["상단의 '＋ Level 1 업무' 버튼으로 최상위 업무를 추가하세요. 각 행에서 ＋를 눌러 Level 2~4의 하위 업무를 추가할 수 있습니다."]),
+      el("button", {
+        class: "top-btn primary",
+        onclick: () => addTask(null),
+      }, ["＋ 첫 업무 추가"]),
+    ]));
+    return;
+  }
+
+  const { start: rangeStart, end: rangeEnd } = projectDateRange();
+  const totalDays = dayDiff(rangeStart, rangeEnd);
+  const dayW = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--day-w")) || 18;
+  const ganttW = Math.max(totalDays * dayW, 600);
+  // Publish the gantt column width to CSS so .grid-row's last column expands to it
+  // (otherwise `1fr` clamps the timeline to whatever space the viewport leaves over
+  // and only the first few days of the axis would be visible).
+  document.documentElement.style.setProperty("--gantt-w", ganttW + "px");
+  // Align the weekend-shading CSS pattern (in .gantt-cell::after) so its 2-day shaded
+  // segment lands on Sat/Sun for the current rangeStart. Pattern is Mon-rooted, so
+  // shift the background-position left by the number of days since the most recent Monday.
+  const dowMon = (rangeStart.getUTCDay() + 6) % 7; // Mon=0, Tue=1, ..., Sun=6
+  document.documentElement.style.setProperty("--weekend-offset", (-dowMon * dayW) + "px");
+
+  // Header row — each data column gets a click-to-pin selector and a resize handle
+  // (Gantt column doesn't).
+  const headerCells = RESIZABLE_COLUMNS.map(col => {
+    const cell = el("div", { class: "cell" }, [col.label]);
+    attachColumnSelector(cell, col);
+    attachColumnResizer(cell, col);
+    return cell;
+  });
+  const headerRow = el("div", { class: "grid-row header-row" }, [
+    ...headerCells,
+    el("div", { class: "gantt-axis-cell" }, [renderGanttAxis(rangeStart, rangeEnd, dayW, ganttW)]),
+  ]);
+  root.appendChild(headerRow);
+
+  // Body rows
+  const list = visibleTasks();
+  const today = todayUTC();
+  const todayOffset = (today >= rangeStart && today <= rangeEnd) ? dayDiff(rangeStart, today) * dayW : null;
+  // Pre-compute holiday positions (in px) once for the visible gantt span so each row's
+  // strip rendering is just an iteration over a small array, not a per-day lookup.
+  const visibleDays = Math.floor(ganttW / dayW);
+  const holidayPositions = [];
+  for (let i = 0; i < visibleDays; i++) {
+    const d = addDays(rangeStart, i);
+    if (holidayState.set.has(fmtDateISO(d))) holidayPositions.push(i * dayW);
+  }
+  for (const t of list) {
+    root.appendChild(renderTaskRow(t, rangeStart, dayW, ganttW, todayOffset, holidayPositions));
+  }
+  if (!list.length && state.filter.assignee) {
+    root.appendChild(el("div", { class: "empty-filter" }, [
+      `담당자 "${state.filter.assignee}"에 일치하는 업무가 없습니다`,
+    ]));
+  }
+
+  // Footer "add level 1"
+  const footer = el("div", {
+    class: "grid-row",
+    style: { borderBottom: "none", background: "transparent" },
+  }, [
+    el("div", { class: "cell", style: { gridColumn: "1 / -1", padding: "10px", color: "var(--text3)", fontSize: "11px" } }, [
+      el("button", {
+        class: "top-btn",
+        onclick: () => addTask(null),
+        style: { padding: "4px 12px", fontSize: "11px" },
+      }, ["＋ Level 1 업무 추가"]),
+    ]),
+  ]);
+  root.appendChild(footer);
+
+  // Re-apply row + column selection to the freshly built DOM.
+  applyRowSelection();
+  applyColSelection();
+}
+
+function renderGanttAxis(start, end, dayW, ganttW) {
+  const wrap = el("div", { class: "gantt-axis", style: { width: ganttW + "px" } });
+  // Month strip
+  let cur = new Date(start.getTime());
+  while (cur < end) {
+    const monthStart = cur;
+    const nextMonth = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1));
+    const segEnd = nextMonth < end ? nextMonth : end;
+    const left = dayDiff(start, monthStart) * dayW;
+    const width = dayDiff(monthStart, segEnd) * dayW;
+    wrap.appendChild(el("div", {
+      class: "gantt-axis-month",
+      style: { left: left + "px", width: width + "px" },
+    }, [`${monthStart.getUTCFullYear()}.${String(monthStart.getUTCMonth() + 1).padStart(2, "0")}`]));
+    cur = nextMonth;
+  }
+  // Day strip (only when zoom is wide enough)
+  const showDayNum = dayW >= 16;
+  const today = todayUTC();
+  for (let i = 0; i < dayDiff(start, end); i++) {
+    const d = addDays(start, i);
+    const dow = d.getUTCDay(); // 0=Sun
+    const isWeekend = dow === 0 || dow === 6;
+    const isHoliday = holidayState.set.has(fmtDateISO(d));
+    const isToday = d.getTime() === today.getTime();
+    const klass = ["gantt-axis-day"];
+    if (isWeekend) klass.push("weekend");
+    if (isHoliday) klass.push("holiday");
+    if (isToday) klass.push("today");
+    wrap.appendChild(el("div", {
+      class: klass.join(" "),
+      style: { left: (i * dayW) + "px" },
+    }, [showDayNum ? String(d.getUTCDate()) : ""]));
+  }
+  return wrap;
+}
+
+function renderTaskRow(t, rangeStart, dayW, ganttW, todayOffset, holidayPositions = []) {
+  const hasChildrenFlag = hasChildren(t.id);
+  const { start, end, derived } = taskDateRange(t);
+  const delay = delayInfo(t, todayUTC());
+
+  const indent = (t.level - 1) * 16;
+
+  // Name cell with toggle, level badge, name input, action buttons
+  const toggle = el("span", {
+    class: "toggle" + (hasChildrenFlag ? "" : " leaf"),
+    onclick: () => updateTask(t.id, { expanded: !t.expanded }),
+  }, [hasChildrenFlag ? (t.expanded === false ? "▶" : "▼") : "•"]);
+
+  const nameInput = el("input", {
+    class: "name-input",
+    value: t.name,
+    placeholder: `Level ${t.level} 업무`,
+    oninput: e => updateTask(t.id, { name: e.target.value }),
+  });
+
+  const actions = el("span", { class: "row-actions" }, [
+    t.level < 4 ? el("button", {
+      class: "row-btn",
+      title: `Level ${t.level + 1} 하위 업무 추가`,
+      onclick: () => addTask(t.id),
+    }, ["＋"]) : null,
+    el("button", {
+      class: "row-btn",
+      title: "같은 레벨 형제 업무 추가",
+      onclick: () => addTask(t.parent_id),
+    }, ["⤓"]),
+    el("button", {
+      class: "row-btn danger",
+      title: "삭제",
+      onclick: () => {
+        const desc = descendantsOf(t.id);
+        const cnt = desc.length;
+        if (cnt > 0 && !confirm(`'${t.name}'과 하위 업무 ${cnt}개를 삭제할까요?`)) return;
+        if (cnt === 0 && t.name && !confirm(`'${t.name}'을 삭제할까요?`)) return;
+        deleteTask(t.id);
+      },
+    }, ["×"]),
+  ]);
+
+  const nameCell = el("div", {
+    class: "cell name-cell",
+    dataset: { colKey: "name" },
+    style: { paddingLeft: (10 + indent) + "px" },
+  }, [
+    toggle,
+    el("span", { class: `lv-badge lv-${t.level}` }, [`L${t.level}`]),
+    delay ? el("span", {
+      class: "delay-badge " + delay.type,
+      title: delay.type === "overdue"
+        ? `완료일이 ${delay.days}일 경과 — 상태: ${STATUS_LABEL[t.status] || t.status}`
+        : `시작일이 ${delay.days}일 경과 — 아직 시작 안 함`,
+    }, [delay.type === "overdue" ? `+${delay.days}일` : `시작 +${delay.days}일`]) : null,
+    nameInput,
+    actions,
+  ]);
+
+  // RFP cell
+  const rfpCell = el("div", { class: "cell", dataset: { colKey: "rfp" } }, [
+    el("input", {
+      class: "text-input rfp",
+      value: t.rfp_no,
+      placeholder: "—",
+      oninput: e => updateTask(t.id, { rfp_no: e.target.value }),
+    }),
+  ]);
+
+  // Assignee cell
+  const assigneeCell = el("div", { class: "cell", dataset: { colKey: "assignee" } }, [
+    el("input", {
+      class: "text-input",
+      value: t.assignee,
+      placeholder: "—",
+      oninput: e => updateTask(t.id, { assignee: e.target.value }),
+    }),
+  ]);
+
+  // Deliverable cell
+  const delivCell = el("div", { class: "cell", dataset: { colKey: "deliv" } }, [
+    el("input", {
+      class: "text-input",
+      value: t.deliverable,
+      placeholder: "—",
+      oninput: e => updateTask(t.id, { deliverable: e.target.value }),
+    }),
+  ]);
+
+  // Status cell — leaves are editable; parents show a derived status auto-summarised
+  // from their leaf descendants (read-only, italic to flag the "auto" nature).
+  const effStatus = effectiveStatus(t);
+  const isLeafTask = !hasChildrenFlag;
+  const statusSelect = el("select", {
+    class: "status-select status-pill " + effStatus + (isLeafTask ? "" : " derived-status"),
+    disabled: isLeafTask ? null : "",
+    title: isLeafTask ? "" : "하위 일정 기준 자동 집계",
+    onchange: e => updateTask(t.id, { status: e.target.value }),
+  }, STATUS_OPTIONS.map(s =>
+    el("option", { value: s.value, selected: s.value === effStatus ? "" : null }, [s.label])));
+  const statusCell = el("div", { class: "cell", dataset: { colKey: "status" } }, [statusSelect]);
+
+  // Progress cell. Editable only while in-progress; not-started/completed are auto-locked
+  // to 0/100, and blocked/on-hold freeze whatever value was reached. The cell has a thin
+  // bar background under the input that fills proportionally for quick visual scanning.
+  const progressVal = progressForStatus(t.status, t.progress);
+  const progressEditable = isProgressEditable(t.status);
+  const progressCell = el("div", { class: "cell progress-cell", dataset: { colKey: "progress" } }, [
+    el("div", { class: "progress-track" }, [
+      el("div", {
+        class: "progress-fill-bar status-" + effStatus,
+        style: { width: progressVal + "%" },
+      }),
+    ]),
+    el("input", {
+      class: "progress-input" + (progressEditable ? "" : " locked"),
+      type: "number", min: "0", max: "100", step: "5",
+      value: progressVal,
+      readOnly: progressEditable ? null : "",
+      title: progressEditable
+        ? "0–100 사이 정수. 5 단위 휠 조절 또는 직접 입력"
+        : t.status === "completed"  ? "완료 상태 — 100% 고정 (상태를 '진행중'으로 바꾸면 수정 가능)"
+        : t.status === "not-started" ? "시작 전 — 0% 고정 (상태를 '진행중'으로 바꾸면 수정 가능)"
+        : "현재 상태에서는 진행률 직접 수정 불가",
+      oninput: e => {
+        if (!isProgressEditable(t.status)) return;
+        const v = clampProgress(e.target.value);
+        updateTask(t.id, { progress: v });
+      },
+      onfocus: e => e.target.select(),
+    }),
+    el("span", { class: "progress-pct-suffix" }, ["%"]),
+  ]);
+
+  // Date cells. When the task has no own start/end but children provide a range,
+  // surface the rolled-up value as a derived display in the input (italic / lighter
+  // color) so users can read parent summary dates here too — not just in the Gantt.
+  // Typing in the input overrides the derived value (calls updateTask with the new value).
+  const derivedStart = !t.start_date && start ? fmtDateISO(start) : "";
+  const derivedEnd   = !t.end_date   && end   ? fmtDateISO(end)   : "";
+  const startCell = el("div", { class: "cell", dataset: { colKey: "start" } }, [
+    el("input", {
+      class: "date-input" + (derivedStart ? " derived-value" : ""),
+      type: "date",
+      value: t.start_date || derivedStart,
+      title: derivedStart ? `하위 일정에서 자동 집계 (${derivedStart}) — 입력하면 직접 값으로 덮어씁니다` : "",
+      onchange: e => updateTask(t.id, { start_date: e.target.value }),
+    }),
+  ]);
+  const endCell = el("div", { class: "cell", dataset: { colKey: "end" } }, [
+    el("input", {
+      class: "date-input" + (derivedEnd ? " derived-value" : ""),
+      type: "date",
+      value: t.end_date || derivedEnd,
+      title: derivedEnd ? `하위 일정에서 자동 집계 (${derivedEnd}) — 입력하면 직접 값으로 덮어씁니다` : "",
+      onchange: e => updateTask(t.id, { end_date: e.target.value }),
+    }),
+  ]);
+
+  // Gantt cell — bar
+  const ganttCell = el("div", {
+    class: "gantt-axis-cell gantt-cell",
+    style: { width: ganttW + "px" },
+  });
+  // grid background
+  ganttCell.appendChild(el("div", { class: "grid-bg" }));
+  if (todayOffset != null) {
+    ganttCell.appendChild(el("div", { class: "today-line", style: { left: todayOffset + "px" } }));
+  }
+  if (start && end && end >= start) {
+    const left = dayDiff(rangeStart, start) * dayW;
+    const width = Math.max(dayW, (dayDiff(start, end) + 1) * dayW);
+    const klass = ["gantt-bar", effStatus, `lv-${t.level}`];
+    if (t.level === 1) klass.push("level-1");
+    if (derived)      klass.push("derived");
+    if (delay)        klass.push("delayed", delay.type);
+    const titleSuffix = (derived ? " · 하위 일정으로 자동 집계" : "")
+      + (delay ? (delay.type === "overdue" ? ` · 완료일 ${delay.days}일 경과` : ` · 시작 ${delay.days}일 지연`) : "");
+    const bar = el("div", {
+      class: klass.join(" "),
+      style: { left: left + "px", width: width + "px" },
+      title: `${t.name} — ${t.start_date || "?"} ~ ${t.end_date || "?"} (${STATUS_LABEL[effStatus] || effStatus})${titleSuffix}`,
+    }, [width > 60 ? t.name : ""]);
+    ganttCell.appendChild(bar);
+  } else if (start || end) {
+    // Single-point marker
+    const d = start || end;
+    const left = dayDiff(rangeStart, d) * dayW;
+    ganttCell.appendChild(el("div", {
+      class: "gantt-bar " + effStatus + ` lv-${t.level}` + (derived ? " derived" : ""),
+      style: { left: left + "px", width: dayW + "px" },
+      title: `${t.name} — ${t.start_date || t.end_date} (${STATUS_LABEL[effStatus] || effStatus})${derived ? " · 하위 일정으로 자동 집계" : " · 시작/완료일 미완"}`,
+    }));
+  }
+
+  // Holiday strips on top of bars (weekends use the cell's ::after gradient overlay).
+  for (const x of holidayPositions) {
+    ganttCell.appendChild(el("div", {
+      class: "holiday-strip",
+      style: { left: x + "px", width: dayW + "px" },
+    }));
+  }
+
+  const row = el("div", {
+    class: "grid-row task-row level-" + t.level,
+    dataset: { taskId: t.id },
+  }, [nameCell, rfpCell, assigneeCell, delivCell, statusCell, progressCell, startCell, endCell, ganttCell]);
+  attachRowSelector(row, t.id);
+
+  return row;
+}
+
+//============ Report (aggregate view) ============
+// Holiday set is loaded asynchronously from holidays-kr.json. Until it resolves the set is
+// empty, which only affects workday counts — render is re-triggered via emit() on resolve.
+const holidayState = { set: new Set(), loaded: false, error: null };
+
+function loadHolidays() {
+  return fetch("./holidays-kr.json")
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(data => {
+      holidayState.set = new Set(Object.keys(data.dates || {}));
+      holidayState.loaded = true;
+      emit();
+    })
+    .catch(err => {
+      holidayState.error = err.message || String(err);
+      // Leave set empty; report still works but workday math ignores holidays.
+      console.warn("[k-wbs] 공휴일 JSON 로드 실패 (페이지가 file://로 열려있나요? http로 서빙하세요):", err);
+      emit();
+    });
+}
+
+function isWorkday(d) {
+  const dow = d.getUTCDay();
+  if (dow === 0 || dow === 6) return false;
+  return !holidayState.set.has(fmtDateISO(d));
+}
+
+function countWorkdays(start, end) {
+  if (!start || !end || end < start) return 0;
+  let cnt = 0;
+  for (let cur = new Date(start.getTime()); cur <= end; cur = addDays(cur, 1)) {
+    if (isWorkday(cur)) cnt++;
+  }
+  return cnt;
+}
+
+function leafTasks() {
+  const parents = new Set();
+  for (const t of state.project.tasks) {
+    if (t.parent_id) parents.add(t.parent_id);
+  }
+  return state.project.tasks.filter(t => !parents.has(t.id));
+}
+
+// Assumed progress: if a task is in-progress with 0% recorded, infer % from elapsed
+// workdays vs total workdays in its date range. Otherwise use the status-normalized value.
+function timeProgressPct(start, end, today) {
+  if (!start || !end || end < start) return 0;
+  if (today < start) return 0;
+  if (today >= end) return 100;
+  const total = countWorkdays(start, end);
+  if (total === 0) return 0;
+  const elapsed = countWorkdays(start, today);
+  return Math.round(elapsed / total * 100);
+}
+
+function effectiveProgress(t, today) {
+  if (t.status === "in-progress" && (t.progress || 0) === 0) {
+    const { start, end } = taskDateRange(t);
+    return timeProgressPct(start, end, today);
+  }
+  return progressForStatus(t.status, t.progress);
+}
+
+function computeReport() {
+  const leaves = leafTasks();
+  const today = todayUTC();
+  let sumActual = 0;
+  // Per-person: collect earliest-start / latest-end across each person's tasks so we can
+  // compute their workdays as a single span (matches WBS's calculation — no double-counting
+  // of overlapping task ranges).
+  const byPerson = new Map();
+
+  for (const t of leaves) {
+    const actual = progressForStatus(t.status, t.progress);
+    sumActual += actual;
+
+    const { start, end } = taskDateRange(t);
+
+    // Co-assignments like "이지현, 본사지원인원" split into individual people. Each
+    // co-assignee gets the FULL date range of the shared task (no 1/N split) so workdays
+    // reflect everyone-fully-engaged semantics.
+    const taskDelay = delayInfo(t, today);
+    const names = parseAssignees(t.assignee);
+    const namesToAdd = names.length ? names : ["(미지정)"];
+    for (const name of namesToAdd) {
+      if (!byPerson.has(name)) byPerson.set(name, { count: 0, sumActual: 0, min: null, max: null, delayedCount: 0 });
+      const p = byPerson.get(name);
+      p.count++;
+      p.sumActual += actual;
+      if (taskDelay) p.delayedCount++;
+      if (start && (!p.min || start < p.min)) p.min = start;
+      if (end   && (!p.max || end   > p.max)) p.max = end;
+    }
+  }
+
+  const n = leaves.length;
+  // Project-level totals use the same single-span workday count as the WBS stat —
+  // earliest start to latest end across ALL tasks (not just leaves so it matches WBS).
+  const { start: projStart, end: projEnd } = projectDateRangeRaw();
+  const totalWd = (projStart && projEnd) ? countWorkdays(projStart, projEnd) : 0;
+  const actualAvg = n ? sumActual / n : 0;
+  // Progress investment uses actual user-recorded progress (not the time-based
+  // assumption) — user explicitly wants real numbers over estimates here.
+  const progressedWd = Math.round(totalWd * actualAvg / 100);
+  const delayedLeaves = leaves.filter(t => delayInfo(t, today));
+  const overdueCount = delayedLeaves.filter(t => delayInfo(t, today).type === "overdue").length;
+  const lateStartCount = delayedLeaves.length - overdueCount;
+
+  return {
+    leafCount: n,
+    overall: n ? Math.round(actualAvg) : 0,
+    totalWorkdays: totalWd,
+    progressedWorkdays: progressedWd,
+    delayedCount: delayedLeaves.length,
+    overdueCount,
+    lateStartCount,
+    byPerson: Array.from(byPerson.entries())
+      .map(([name, p]) => {
+        const wd = countWorkdays(p.min, p.max);
+        const avg = p.count ? p.sumActual / p.count : 0;
+        return {
+          name,
+          count: p.count,
+          avgProgress: Math.round(avg),
+          workdays: wd,
+          progressedWd: Math.round(wd * avg / 100),
+          delayedCount: p.delayedCount,
+          delayedRate: p.count ? Math.round(p.delayedCount / p.count * 100) : 0,
+        };
+      })
+      .sort((a, b) => b.workdays - a.workdays || a.name.localeCompare(b.name, "ko")),
+  };
+}
+
+function pctBar(pct) {
+  const safe = Math.max(0, Math.min(100, pct));
+  return el("span", { class: "pct-bar" }, [el("i", { style: { width: safe + "%" } })]);
+}
+
+function renderReport() {
+  const root = $("#wbs");
+  root.innerHTML = "";
+
+  const r = computeReport();
+  const wrap = el("div", { class: "report-wrap" });
+
+  if (r.leafCount === 0) {
+    wrap.appendChild(el("div", { class: "empty" }, [
+      el("div", { class: "icon" }, ["📊"]),
+      el("h2", {}, ["집계할 업무가 없습니다"]),
+      el("p", {}, ["WBS 탭에서 업무를 추가한 뒤 다시 확인하세요."]),
+    ]));
+    root.appendChild(wrap);
+    return;
+  }
+
+  // ── Top cards ── (3-card layout — assumed-progress card was removed at user request;
+  // every metric here is based on the user-recorded actual progress.)
+  const cardOverall = el("div", { class: "report-card accent" }, [
+    el("div", { class: "label" }, ["전체 진행률"]),
+    el("div", { class: "value" }, [r.overall + "%"]),
+    el("div", { class: "sub" }, [`Leaf 업무 ${r.leafCount}개 평균 (실측값)`]),
+    el("div", { class: "bar" }, [el("i", { style: { width: r.overall + "%" } })]),
+  ]);
+  const wdPct = r.totalWorkdays ? Math.round(r.progressedWorkdays / r.totalWorkdays * 100) : 0;
+  const cardWd = el("div", { class: "report-card" }, [
+    el("div", { class: "label" }, ["진행 투입일 / 총 투입일"]),
+    el("div", { class: "value" }, [`${r.progressedWorkdays} / ${r.totalWorkdays}일`]),
+    el("div", { class: "sub" }, ["주말·한국 공휴일 제외 · 실측 진행률 기반"]),
+    el("div", { class: "bar" }, [el("i", { style: { width: wdPct + "%" } })]),
+  ]);
+  const delaySubParts = [];
+  if (r.overdueCount)   delaySubParts.push(`완료일 경과 ${r.overdueCount}개`);
+  if (r.lateStartCount) delaySubParts.push(`시작 지연 ${r.lateStartCount}개`);
+  const cardDelay = el("div", { class: "report-card" + (r.delayedCount ? " danger" : "") }, [
+    el("div", { class: "label" }, ["지연 업무"]),
+    el("div", { class: "value" }, [`${r.delayedCount}개`]),
+    el("div", { class: "sub" }, [delaySubParts.join(" · ") || "지연 없음"]),
+  ]);
+  wrap.appendChild(el("div", { class: "report-grid" }, [cardOverall, cardWd, cardDelay]));
+
+  // ── Per-assignee table ──
+  wrap.appendChild(el("h2", {}, ["인원별 진행률"]));
+  const headRow = el("tr", {}, [
+    el("th", {}, ["담당자"]),
+    el("th", { class: "num" }, ["업무 수"]),
+    el("th", { class: "num" }, ["투입일"]),
+    el("th", { class: "num" }, ["진행 투입일"]),
+    el("th", { class: "pct-cell" }, ["진행률"]),
+    el("th", { class: "num" }, ["지연"]),
+  ]);
+  const bodyRows = r.byPerson.map(p => {
+    const delayedCell = p.delayedCount
+      ? el("td", { class: "num delay-cell" }, [`${p.delayedCount}개 · ${p.delayedRate}%`])
+      : el("td", { class: "num" }, ["—"]);
+    return el("tr", {}, [
+      el("td", {}, [p.name]),
+      el("td", { class: "num" }, [String(p.count)]),
+      el("td", { class: "num" }, [`${p.workdays}일`]),
+      el("td", { class: "num" }, [`${p.progressedWd}일`]),
+      el("td", { class: "pct-cell" }, [pctBar(p.avgProgress), `${p.avgProgress}%`]),
+      delayedCell,
+    ]);
+  });
+  wrap.appendChild(el("table", { class: "report-table" }, [
+    el("thead", {}, [headRow]),
+    el("tbody", {}, bodyRows),
+  ]));
+
+  // ── Footnote on data state ──
+  const noteParts = [];
+  if (!holidayState.loaded && !holidayState.error) noteParts.push("공휴일 데이터 로딩 중…");
+  if (holidayState.error) noteParts.push(`공휴일 JSON 로드 실패 (${holidayState.error}) — 주말만 제외하고 계산했습니다.`);
+  if (noteParts.length) wrap.appendChild(el("div", { class: "report-note" }, [noteParts.join(" · ")]));
+
+  root.appendChild(wrap);
+}
+
+//============ Import / Export ============
+function safeFilename() {
+  return (state.project.name || "wbs").replace(/[^\w가-힣.-]+/g, "_");
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportJson() {
+  // Bundle the project + computed report so consumers (humans or downstream scripts) get
+  // both the source data and the aggregated metrics in a single artifact.
+  const payload = {
+    ...state.project,
+    report: computeReport(),
+    exported_at: new Date().toISOString(),
+  };
+  const data = JSON.stringify(payload, null, 2);
+  const blob = new Blob([data], { type: "application/json" });
+  triggerDownload(blob, `${safeFilename()}-wbs.json`);
+}
+
+// Preorder traversal of all tasks (regardless of expanded state).
+// Used for export: every row in the data, parents first.
+function orderedTasks() {
+  const out = [];
+  const childrenByParent = new Map();
+  for (const t of state.project.tasks) {
+    const key = t.parent_id || "_root";
+    if (!childrenByParent.has(key)) childrenByParent.set(key, []);
+    childrenByParent.get(key).push(t);
+  }
+  const walk = (parentId) => {
+    for (const t of (childrenByParent.get(parentId || "_root") || [])) {
+      out.push(t);
+      walk(t.id);
+    }
+  };
+  walk(null);
+  return out;
+}
+
+async function exportExcel() {
+  let XLSX;
+  $("#saveStatus").textContent = "엑셀 생성중…";
+  try {
+    XLSX = await import("https://esm.sh/xlsx@0.18.5");
+  } catch (err) {
+    console.error(err);
+    $("#saveStatus").textContent = "";
+    alert("Excel 라이브러리 로드 실패 (네트워크?).\nJSON 또는 CSV로 export하세요.\n\n" + err.message);
+    return;
+  }
+
+  // Build rows in tree (preorder) so parent appears above its children.
+  const tasks = orderedTasks();
+  const rows = tasks.map(t => ({
+    "Level":   t.level,
+    "WBS":     "  ".repeat(t.level - 1) + (t.name || ""),
+    "RFP No.": t.rfp_no || "",
+    "담당자":   t.assignee || "",
+    "산출물":   t.deliverable || "",
+    "상태":     STATUS_LABEL[t.status] || t.status || "",
+    "진행률":   progressForStatus(t.status, t.progress),
+    "시작일":   t.start_date || "",
+    "완료일":   t.end_date || "",
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(rows, { header: EXCEL_HEADERS });
+  // Column widths (in Excel char units)
+  ws["!cols"] = [
+    { wch: 6 },   // Level
+    { wch: 42 },  // WBS (indented name)
+    { wch: 14 },  // RFP No.
+    { wch: 12 },  // 담당자
+    { wch: 20 },  // 산출물
+    { wch: 10 },  // 상태
+    { wch: 8 },   // 진행률
+    { wch: 12 },  // 시작일
+    { wch: 12 },  // 완료일
+  ];
+  // Freeze header row
+  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+
+  const wb = XLSX.utils.book_new();
+  const sheetName = (state.project.name || "WBS").slice(0, 31).replace(/[\[\]\*\/\\\?:]/g, "_");
+  XLSX.utils.book_append_sheet(wb, ws, sheetName || "WBS");
+
+  // Second sheet — Report summary (same data shown in the Report view).
+  const r = computeReport();
+  const summary = [
+    ["전체 진행률 (%)",             r.overall],
+    ["진행 투입일 / 총 투입일 (일)", `${r.progressedWorkdays} / ${r.totalWorkdays}`],
+    ["지연 업무 (개)",              r.delayedCount],
+    ["  · 완료일 경과 (개)",         r.overdueCount],
+    ["  · 시작 지연 (개)",          r.lateStartCount],
+    ["Leaf 업무 수",                r.leafCount],
+  ];
+  const reportRows = [
+    ["프로젝트 요약"],
+    ...summary,
+    [],
+    ["인원별"],
+    ["담당자", "업무 수", "투입일", "진행 투입일", "진행률(%)", "지연 개수", "지연률(%)"],
+    ...r.byPerson.map(p => [p.name, p.count, p.workdays, p.progressedWd, p.avgProgress, p.delayedCount, p.delayedRate]),
+  ];
+  const wsReport = XLSX.utils.aoa_to_sheet(reportRows);
+  wsReport["!cols"] = [{ wch: 28 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, wsReport, "Report");
+
+  const arr = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([arr], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  triggerDownload(blob, `${safeFilename()}-wbs.xlsx`);
+  $("#saveStatus").textContent = "엑셀 저장됨";
+  setTimeout(() => { if ($("#saveStatus").textContent === "엑셀 저장됨") $("#saveStatus").textContent = ""; }, 1500);
+}
+
+// PDF export — build a printable HTML block (project name + summary cards + per-person
+// table), inject into <body>, trigger window.print(), then clean up. Uses the browser's
+// native "Save as PDF" target so we don't pull in a heavy PDF lib.
+function exportPdf() {
+  const r = computeReport();
+  const project = state.project || {};
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+
+  const el2 = (tag, attrs, children) => el(tag, attrs, children);
+  const cards = el2("div", { class: "pdf-cards" }, [
+    el2("div", { class: "pdf-card" }, [
+      el2("div", { class: "lbl" }, ["전체 진행률"]),
+      el2("div", { class: "val" }, [r.overall + "%"]),
+      el2("div", { class: "sub" }, [`Leaf 업무 ${r.leafCount}개 평균 (실측값)`]),
+    ]),
+    el2("div", { class: "pdf-card" }, [
+      el2("div", { class: "lbl" }, ["진행 투입일 / 총 투입일"]),
+      el2("div", { class: "val" }, [`${r.progressedWorkdays} / ${r.totalWorkdays}일`]),
+      el2("div", { class: "sub" }, ["주말·한국 공휴일 제외 · 실측 진행률 기반"]),
+    ]),
+    el2("div", { class: "pdf-card" + (r.delayedCount ? " danger" : "") }, [
+      el2("div", { class: "lbl" }, ["지연 업무"]),
+      el2("div", { class: "val" }, [`${r.delayedCount}개`]),
+      el2("div", { class: "sub" }, [
+        r.delayedCount ? `완료일 경과 ${r.overdueCount}개 · 시작 지연 ${r.lateStartCount}개` : "지연 없음",
+      ]),
+    ]),
+  ]);
+
+  const personHead = el2("tr", {}, [
+    el2("th", {}, ["담당자"]),
+    el2("th", { class: "num" }, ["업무 수"]),
+    el2("th", { class: "num" }, ["투입일"]),
+    el2("th", { class: "num" }, ["진행 투입일"]),
+    el2("th", { class: "num" }, ["진행률"]),
+    el2("th", { class: "num" }, ["지연"]),
+  ]);
+  const personBody = r.byPerson.map(p => el2("tr", {}, [
+    el2("td", {}, [p.name]),
+    el2("td", { class: "num" }, [String(p.count)]),
+    el2("td", { class: "num" }, [`${p.workdays}일`]),
+    el2("td", { class: "num" }, [`${p.progressedWd}일`]),
+    el2("td", { class: "num" }, [`${p.avgProgress}%`]),
+    el2("td", { class: "num" + (p.delayedCount ? " delay" : "") },
+      [p.delayedCount ? `${p.delayedCount}개 · ${p.delayedRate}%` : "—"]),
+  ]));
+  const personTable = el2("table", {}, [
+    el2("thead", {}, [personHead]),
+    el2("tbody", {}, personBody),
+  ]);
+
+  // WBS task list — preorder, indented by level. Keeps the per-task detail in the PDF
+  // so the document is self-contained.
+  const wbsHead = el2("tr", {}, [
+    el2("th", {}, ["업무"]),
+    el2("th", {}, ["담당자"]),
+    el2("th", { class: "num" }, ["상태"]),
+    el2("th", { class: "num" }, ["진행률"]),
+    el2("th", { class: "num" }, ["시작일"]),
+    el2("th", { class: "num" }, ["완료일"]),
+  ]);
+  const wbsBody = orderedTasks().map(t => {
+    const eff = effectiveStatus(t);
+    return el2("tr", {}, [
+      el2("td", { style: { paddingLeft: (8 + (t.level - 1) * 14) + "px" } }, [`L${t.level} ${t.name || ""}`]),
+      el2("td", {}, [t.assignee || ""]),
+      el2("td", { class: "num" }, [STATUS_LABEL[eff] || eff || ""]),
+      el2("td", { class: "num" }, [progressForStatus(t.status, t.progress) + "%"]),
+      el2("td", { class: "num" }, [t.start_date || ""]),
+      el2("td", { class: "num" }, [t.end_date || ""]),
+    ]);
+  });
+  const wbsTable = el2("table", {}, [
+    el2("thead", {}, [wbsHead]),
+    el2("tbody", {}, wbsBody),
+  ]);
+
+  const cover = el2("section", { class: "pdf-cover" }, [
+    el2("div", { class: "label" }, ["Project Report"]),
+    el2("div", { class: "name" }, [project.name || "WBS"]),
+    el2("div", { class: "rule" }),
+    el2("div", { class: "date" }, [`Exported ${dateStr}`]),
+  ]);
+
+  const report = el2("div", { class: "pdf-report" }, [
+    cover,
+    el2("h1", {}, [project.name || "WBS"]),
+    el2("div", { class: "meta" }, [`Exported ${dateStr} · WBS Report`]),
+    el2("h2", {}, ["요약"]),
+    cards,
+    el2("h2", {}, ["인원별 진행률"]),
+    personTable,
+    el2("h2", {}, ["업무 목록"]),
+    wbsTable,
+  ]);
+
+  document.body.appendChild(report);
+  const cleanup = () => { report.remove(); window.removeEventListener("afterprint", cleanup); };
+  window.addEventListener("afterprint", cleanup);
+  // Some browsers don't fire afterprint reliably (e.g. iOS Safari) — schedule a fallback.
+  setTimeout(cleanup, 60_000);
+  window.print();
+}
+
+// Dispatch by file extension: .json → JSON restore, .xlsx → Excel sheet import.
+function importProject(file) {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
+    importExcel(file);
+  } else if (lower.endsWith(".json")) {
+    importJson(file);
+  } else {
+    // Sniff by content as a last resort: JSON starts with { or [, xlsx is a ZIP (PK..).
+    const reader = new FileReader();
+    reader.onload = e => {
+      const head = new Uint8Array(e.target.result.slice(0, 4));
+      if (head[0] === 0x50 && head[1] === 0x4b) importExcel(file);
+      else importJson(file);
+    };
+    reader.readAsArrayBuffer(file.slice(0, 4));
+  }
+}
+
+function importJson(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data.tasks)) throw new Error("invalid format: tasks[] missing");
+      state.project = {
+        version: data.version || SCHEMA_VERSION,
+        name: data.name || "imported",
+        tasks: data.tasks.map(t => {
+          const status = STATUS_LABEL[t.status] ? t.status : "not-started";
+          return {
+            id: t.id || genId(),
+            parent_id: t.parent_id || null,
+            level: Math.max(1, Math.min(4, t.level || 1)),
+            name: t.name || "",
+            rfp_no: t.rfp_no || "",
+            assignee: t.assignee || "",
+            deliverable: t.deliverable || "",
+            status,
+            progress: progressForStatus(status, t.progress),
+            start_date: t.start_date || "",
+            end_date: t.end_date || "",
+            expanded: t.expanded !== false,
+          };
+        }),
+      };
+      emit(); saveSoon();
+    } catch (err) {
+      alert("JSON Import 실패: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// Convert Excel cell value to ISO YYYY-MM-DD string (or "" if not a date).
+//   `contextYear` (optional) is used when the source cell only carries month/day
+//   (e.g., "1/15" or "01-15"). Without an explicit context year, we fall back to
+//   the current year. The caller is expected to advance contextYear as it walks
+//   rows so partial-date cells inherit the most recently seen full-date year.
+// Parse a "진행률" cell into a 0-100 integer. Accepts "75", "75%", " 75 % ", "0.75".
+function parsePctValue(v) {
+  if (v == null || v === "") return 0;
+  if (typeof v === "number") {
+    return v <= 1 ? Math.round(v * 100) : Math.round(v);
+  }
+  const s = String(v).trim().replace(/\s+/g, "").replace(/%$/, "");
+  if (!s) return 0;
+  const n = parseFloat(s);
+  if (!Number.isFinite(n)) return 0;
+  return n <= 1 ? Math.round(n * 100) : Math.round(n);
+}
+
+// Scan a column's values to vote on the date layout (US M/D/Y vs EU D/M/Y vs ISO Y/M/D).
+// For each 3-part value, the position whose max exceeds 12 must be the day,
+// and a part > 31 must be the year (2-digit year ≤ 99). Returns 'mdy' / 'dmy' /
+// 'ymd' / 'unknown'. Caller passes this hint to excelCellToISODate so ambiguous
+// rows (`5/8/26` — could be either) consistently follow the column's pattern.
+function detectColumnDateLayout(values) {
+  let mdy = 0, dmy = 0, ymd = 0;
+  for (const v of values) {
+    if (v == null || v === "" || v instanceof Date) continue;
+    const s = String(v).trim().replace(/\s+/g, "").replace(/\.$/, "");
+    if (!s) continue;
+    const m = /^(\d{1,4})[.\-/](\d{1,2})[.\-/](\d{1,4})$/.exec(s);
+    if (!m) continue;
+    const a = parseInt(m[1]), b = parseInt(m[2]), c = parseInt(m[3]);
+    // Year-first (4-digit first part) → ymd vote.
+    if (m[1].length === 4 || a > 31) { ymd++; continue; }
+    // Year-last: first two parts decide M/D vs D/M.
+    if (a > 12 && b <= 12) dmy++;        // first must be a day
+    else if (b > 12 && a <= 12) mdy++;   // second must be a day
+    // both ≤ 12 (e.g., "5/8/26") → no vote, ambiguous.
+  }
+  const top = Math.max(mdy, dmy, ymd);
+  if (top === 0) return "unknown";
+  if (ymd === top) return "ymd";
+  if (mdy === top) return "mdy";
+  return "dmy";
+}
+
+function excelCellToISODate(v, contextYear, layoutHint) {
+  if (v == null || v === "") return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  // Native Date (from SheetJS cellDates:true).
+  if (v instanceof Date && !isNaN(v)) {
+    return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
+  }
+  // Normalize: trim, strip all internal whitespace, and drop a trailing dot
+  // (Korean default Excel format renders as "2026. 1. 15." with spaces and trailing dot).
+  let s = String(v).trim().replace(/\s+/g, "").replace(/\.$/, "");
+  if (!s) return "";
+  // ISO already.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // Korean style: "2026년1월15일" / "2026년 1월 15일" (after ws strip → "2026년1월15일")
+  let m = /^(\d{4})년(\d{1,2})월(\d{1,2})일?$/.exec(s);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  // Full date — year-first: YYYY[ . / - ]M[M][ . / - ]D[D]
+  m = /^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})$/.exec(s);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  // Compact YYYYMMDD
+  m = /^(\d{4})(\d{2})(\d{2})$/.exec(s);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  // Year-last 3-part: A[.\-/]B[.\-/]C  where C is the year (2 or 4 digits).
+  //   Layout disambiguation:
+  //     • layoutHint === "dmy"  → A is day, B is month.
+  //     • layoutHint === "mdy"  → A is month, B is day (US default).
+  //     • unspecified           → infer from values: A > 12 ⇒ swap to D/M/Y; else default M/D/Y.
+  //   2-digit year expansion: 00-49 → 20xx, 50-99 → 19xx (Excel pivot convention).
+  m = /^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2}|\d{4})$/.exec(s);
+  if (m) {
+    let a = parseInt(m[1]), b = parseInt(m[2]);
+    let yy = parseInt(m[3]);
+    if (m[3].length === 2) yy = yy < 50 ? 2000 + yy : 1900 + yy;
+    let mm, dd;
+    if (layoutHint === "dmy") { dd = a; mm = b; }
+    else if (layoutHint === "mdy") { mm = a; dd = b; }
+    else if (a > 12 && b <= 12) { mm = b; dd = a; } // auto-swap when first is clearly a day
+    else { mm = a; dd = b; }                         // default M/D/Y
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31 && yy >= 1900 && yy <= 2200) {
+      return `${yy}-${pad(mm)}-${pad(dd)}`;
+    }
+  }
+  // Korean partial: "1월15일"
+  m = /^(\d{1,2})월(\d{1,2})일?$/.exec(s);
+  if (m) {
+    const mm = parseInt(m[1]), dd = parseInt(m[2]);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      const y = Number.isFinite(contextYear) ? contextYear : new Date().getFullYear();
+      return `${y}-${pad(mm)}-${pad(dd)}`;
+    }
+  }
+  // Partial month-day only (M[M] / D[D], M[M] - D[D], M[M] . D[D]).
+  // Year falls back to contextYear → current year.
+  m = /^(\d{1,2})[.\-/](\d{1,2})$/.exec(s);
+  if (m) {
+    const mm = parseInt(m[1]), dd = parseInt(m[2]);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      const y = Number.isFinite(contextYear) ? contextYear : new Date().getFullYear();
+      return `${y}-${pad(mm)}-${pad(dd)}`;
+    }
+  }
+  // Excel serial date (rare since we set cellDates:true, but a safety net).
+  const n = Number(s);
+  if (Number.isFinite(n) && n > 0 && n < 100000) {
+    const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+    if (!isNaN(d)) return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  }
+  // Couldn't parse anything — log the offending value with character codes so invisible
+  // characters (NBSP, zero-width spaces, BOM, RTL marks) become visible in DevTools.
+  if (s) {
+    const codes = [...s].map(c => c.charCodeAt(0)).join(",");
+    console.warn(
+      `[WBS Import] 날짜 인식 실패 — raw: ${JSON.stringify(v)} · normalized: ${JSON.stringify(s)}` +
+      ` · type: ${typeof v} · charCodes: [${codes}] · layoutHint: ${layoutHint || "(none)"}`
+    );
+  }
+  return "";
+}
+
+// ── Import column mapping (HITL): when a sheet doesn't match the canonical export
+//    layout, open a dialog to let the user pick which source column maps to which
+//    WBS field. Auto-detection by header-name fuzzy match pre-fills the dropdowns.
+
+// Two distinct mapping shapes:
+//   single — one "WBS / 업무명" column carries the task name, optional "Level" column.
+//   split  — one column per WBS level (L1~L4). Level is derived from the rightmost
+//            non-empty Lx in each row, and the task name = that cell's value.
+//            (Common pattern in Korean PM templates: 대분류/중분류/소분류/세분류.)
+const COLUMN_MAP_SINGLE = [
+  { key: "level",    label: "Level",        required: false, hints: ["level", "레벨", "lvl"] },
+  { key: "wbs",      label: "WBS / 업무명", required: true,  hints: ["wbs", "task", "업무", "name", "이름", "title"] },
+  { key: "rfp",      label: "RFP No.",      required: false, hints: ["rfp", "id", "no.", "no", "번호", "code"] },
+  { key: "assignee", label: "담당자",        required: false, hints: ["담당", "owner", "assignee", "person"] },
+  { key: "deliv",    label: "산출물",        required: false, hints: ["산출", "deliv", "output", "artifact", "결과"] },
+  { key: "status",   label: "상태",          required: false, hints: ["status", "상태", "state"] },
+  { key: "progress", label: "진행률",        required: false, hints: ["진행률", "진행", "progress", "%", "완료율", "달성률", "percent"] },
+  { key: "start",    label: "시작일",        required: false, hints: ["시작", "start", "begin", "from", "착수"] },
+  { key: "end",      label: "완료일",        required: false, hints: ["완료", "end", "finish", "due", "until", "종료"] },
+];
+const COLUMN_MAP_SPLIT = [
+  { key: "l1",       label: "L1 (대분류)",   required: true,  hints: ["l1", "level 1", "level1", "1단계", "대분류", "1차"] },
+  { key: "l2",       label: "L2 (중분류)",   required: false, hints: ["l2", "level 2", "level2", "2단계", "중분류", "2차"] },
+  { key: "l3",       label: "L3 (소분류)",   required: false, hints: ["l3", "level 3", "level3", "3단계", "소분류", "3차"] },
+  { key: "l4",       label: "L4 (세분류)",   required: false, hints: ["l4", "level 4", "level4", "4단계", "세분류", "4차"] },
+  { key: "rfp",      label: "RFP No.",       required: false, hints: ["rfp", "id", "no.", "no", "번호", "code"] },
+  { key: "assignee", label: "담당자",         required: false, hints: ["담당", "owner", "assignee", "person"] },
+  { key: "deliv",    label: "산출물",         required: false, hints: ["산출", "deliv", "output", "artifact", "결과"] },
+  { key: "status",   label: "상태",           required: false, hints: ["status", "상태", "state"] },
+  { key: "progress", label: "진행률",         required: false, hints: ["진행률", "진행", "progress", "%", "완료율", "달성률", "percent"] },
+  { key: "start",    label: "시작일",         required: false, hints: ["시작", "start", "begin", "from", "착수"] },
+  { key: "end",      label: "완료일",         required: false, hints: ["완료", "end", "finish", "due", "until", "종료"] },
+];
+// Back-compat shim — older code referenced COLUMN_MAP_TARGETS (single mode).
+const COLUMN_MAP_TARGETS = COLUMN_MAP_SINGLE;
+
+// Auto-pick the most plausible mode based on header names:
+// if ≥2 columns look like L1/L2/L3/L4 (or Korean equivalents), default to split mode.
+function detectImportMode(headers) {
+  const lvlPattern = /^(l[1-4]|level\s*[1-4]|[1-4]단계|[1-4]차)$/i;
+  const matches = headers.filter(h => lvlPattern.test(String(h ?? "").trim().replace(/\s+/g, " ")));
+  return matches.length >= 2 ? "split" : "single";
+}
+
+function autoDetectMapping(headers, mode = "single") {
+  const map = {};
+  const lower = headers.map(h => String(h ?? "").trim().toLowerCase());
+  const targets = mode === "split" ? COLUMN_MAP_SPLIT : COLUMN_MAP_SINGLE;
+  for (const target of targets) {
+    let found = -1;
+    for (const h of target.hints) {
+      const i = lower.findIndex(x => x === h.toLowerCase());
+      if (i >= 0) { found = i; break; }
+    }
+    if (found < 0) {
+      for (const h of target.hints) {
+        const i = lower.findIndex(x => x && x.includes(h.toLowerCase()));
+        if (i >= 0) { found = i; break; }
+      }
+    }
+    map[target.key] = found;
+  }
+  return map;
+}
+
+// Build tasks from data rows (header already stripped) using a user-defined mapping.
+// `mode` is "single" (one WBS column + optional Level) or "split" (L1~L4 separate cols).
+// Partial dates (MM/DD only) inherit the year from the most recently seen full date.
+function buildTasksFromMapping(dataRows, mapping, mode = "single") {
+  const out = [];
+  const lastAtLevel = {};
+  const get = (r, key) => mapping[key] >= 0 ? r[mapping[key]] : undefined;
+
+  // Year context for partial dates. Initialized to the current year, then bumped
+  // whenever we successfully parse a full date with a year.
+  let contextYear = new Date().getFullYear();
+  const advanceContextYearFromISO = (iso) => {
+    if (!iso) return;
+    const y = parseInt(iso.slice(0, 4));
+    if (Number.isFinite(y) && y >= 1970) contextYear = y;
+  };
+
+  // Pre-scan start AND end columns combined to vote on the date layout. Both columns
+  // typically share the same format, so combining gives more evidence. The hint then
+  // disambiguates rows like "5/8/26" — without it we'd default to M/D/Y, but if the
+  // column elsewhere has "17/8/26", the dmy vote wins for the whole column.
+  const layoutSamples = [];
+  if (mapping.start >= 0) for (const r of dataRows) if (r) layoutSamples.push(r[mapping.start]);
+  if (mapping.end   >= 0) for (const r of dataRows) if (r) layoutSamples.push(r[mapping.end]);
+  const layoutHint = detectColumnDateLayout(layoutSamples);
+  if (layoutHint !== "unknown") {
+    console.info(`[WBS Import] 날짜 layout 감지: ${layoutHint} (${layoutSamples.filter(v => v != null && v !== "").length}개 셀 기반)`);
+  }
+
+  const pushTask = (r, level, name) => {
+    // Walk UP from level-1 looking for the nearest existing ancestor — handles Excel
+    // sheets that skip an intermediate level (e.g., an L3 row arrives before any L2
+    // has been seen in the current branch). Without this, the L3 would orphan to
+    // parent_id=null and an upstream L2 would never receive its child for status rollup.
+    let parentId = null;
+    for (let lv = level - 1; lv >= 1; lv--) {
+      if (lastAtLevel[lv]) { parentId = lastAtLevel[lv]; break; }
+    }
+    const start = excelCellToISODate(get(r, "start"), contextYear, layoutHint);
+    advanceContextYearFromISO(start);
+    const end = excelCellToISODate(get(r, "end"), contextYear, layoutHint);
+    advanceContextYearFromISO(end);
+    const status = STATUS_VALUE_BY_LABEL[String(get(r, "status") ?? "").trim()] || "not-started";
+    const t = {
+      id: genId(),
+      parent_id: parentId,
+      level,
+      name,
+      rfp_no: String(get(r, "rfp") ?? "").trim(),
+      assignee: String(get(r, "assignee") ?? "").trim(),
+      deliverable: String(get(r, "deliv") ?? "").trim(),
+      status,
+      progress: progressForStatus(status, parsePctValue(get(r, "progress"))),
+      start_date: start,
+      end_date: end,
+      expanded: true,
+    };
+    out.push(t);
+    lastAtLevel[level] = t.id;
+    for (let k = level + 1; k <= 4; k++) delete lastAtLevel[k];
+  };
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const r = dataRows[i];
+    if (!r) continue;
+    if (mode === "split") {
+      let level = 0, name = "";
+      for (let lv = 1; lv <= 4; lv++) {
+        const idx = mapping[`l${lv}`];
+        if (idx == null || idx < 0) continue;
+        const v = String(r[idx] ?? "").trim();
+        if (v) { level = lv; name = v; }
+      }
+      if (!level || !name) continue;
+      pushTask(r, level, name);
+    } else {
+      let lv = parseInt(get(r, "level"));
+      if (!Number.isFinite(lv) || lv < 1) lv = 1;
+      if (lv > 4) lv = 4;
+      const name = String(get(r, "wbs") ?? "").replace(/^\s+/, "").trim();
+      if (!name) continue;
+      pushTask(r, lv, name);
+    }
+  }
+  return out;
+}
+
+// Multi-row header support. Many real-world templates put a category in row 1
+// (often merged across columns — e.g., "일정") and the sub-headers in row 2
+// ("시작" / "종료"). We collapse multiple header rows into a single effective
+// header string per column so the rest of the import flow works unchanged.
+function detectHeaderRowCount(ws, rows) {
+  const merges = ws && ws["!merges"] ? ws["!merges"] : [];
+  // (A) Row 0 has any horizontal merge spanning ≥ 2 columns → almost certainly a 2-row header.
+  if (merges.some(m => m.s.r === 0 && m.e.r === 0 && m.e.c > m.s.c)) return 2;
+  if (rows.length < 2) return 1;
+
+  const r0 = rows[0] || [];
+  const r1 = rows[1] || [];
+  const nonEmpty = (arr) => arr.filter(c => String(c ?? "").trim()).length;
+  const n0 = nonEmpty(r0), n1 = nonEmpty(r1);
+
+  // (B) Sparse row 0 + dense row 1.
+  if (n1 > 0 && n1 >= n0 + 2 && n0 < r0.length * 0.7) return 2;
+
+  // (C) Adjacent duplicates in row 0 (unmerged categorical labels — common when a user
+  // writes "plan" twice instead of merging the cells).
+  let adjDups = 0;
+  for (let i = 1; i < r0.length; i++) {
+    const a = String(r0[i] ?? "").trim();
+    const b = String(r0[i - 1] ?? "").trim();
+    if (a && a === b) adjDups++;
+  }
+  if (adjDups >= 1 && n1 > 0) return 2;
+
+  // (D) Row 1 contains ≥ 2 recognizable sub-header keywords (start/end/시작/종료/...).
+  // Strong signal that row 1 is a sub-header, not data.
+  const subPattern = /^(시작(일)?|종료(일)?|착수(일)?|완료(일)?|start(\s*date)?|end(\s*date)?|begin|finish|due|from|to|기간)$/i;
+  const r1Sub = r1.filter(c => subPattern.test(String(c ?? "").trim())).length;
+  if (r1Sub >= 2) return 2;
+
+  return 1;
+}
+
+function buildEffectiveHeaders(rows, headerRowCount, merges = []) {
+  if (headerRowCount <= 1) {
+    return (rows[0] || []).map(h => String(h ?? "").trim());
+  }
+  // Two (or more) header rows. Propagate merged top-row values across their span,
+  // then concatenate row[0] / row[1] / ... per column.
+  const propagated = [];
+  for (let r = 0; r < headerRowCount; r++) {
+    const row = [...(rows[r] || [])];
+    // Apply horizontal merges that originate on this row.
+    for (const m of (merges || [])) {
+      if (m.s.r === r && m.e.r >= r && m.e.c > m.s.c) {
+        const v = row[m.s.c];
+        for (let c = m.s.c + 1; c <= m.e.c; c++) {
+          if (row[c] == null || String(row[c]).trim() === "") row[c] = v;
+        }
+      }
+    }
+    propagated.push(row);
+  }
+  const width = Math.max(...propagated.map(r => r.length), 0);
+  const out = [];
+  for (let i = 0; i < width; i++) {
+    const parts = [];
+    for (let r = 0; r < headerRowCount; r++) {
+      const v = String(propagated[r][i] ?? "").trim();
+      if (v && !parts.includes(v)) parts.push(v);
+    }
+    out.push(parts.join(" / "));
+  }
+  return out;
+}
+
+// Encapsulate sheet metadata so it can be re-derived when the user toggles
+// headerRowCount in the dialog.
+function makeSheetMeta(name, ws, rows, headerRowCount) {
+  const merges = (ws && ws["!merges"]) || [];
+  const headers = buildEffectiveHeaders(rows, headerRowCount, merges);
+  const dataRows = rows.slice(headerRowCount);
+  return {
+    name, rows, merges, headerRowCount,
+    headers, dataRows,
+    dataRowCount: dataRows.length,
+  };
+}
+
+// Re-derive headers/dataRows in-place when the user toggles header row count.
+function remakeSheetMeta(meta, newHeaderRowCount) {
+  meta.headerRowCount = newHeaderRowCount;
+  meta.headers = buildEffectiveHeaders(meta.rows, newHeaderRowCount, meta.merges);
+  meta.dataRows = meta.rows.slice(newHeaderRowCount);
+  meta.dataRowCount = meta.dataRows.length;
+  return meta;
+}
+
+// A → A, Z → Z, AA → AA, etc. (Excel-style column letters)
+function excelColumnLetter(idx) {
+  let s = "", n = idx;
+  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return s;
+}
+
+// Open the mapping dialog for a workbook that has no canonical match.
+// `workbookMeta` = { XLSX, sheets: [{ name, headers, rows, dataRowCount }], fileName }
+function openImportMappingDialog(workbookMeta) {
+  const { sheets, fileName } = workbookMeta;
+  if (!sheets.length) { alert("⚠ 빈 파일입니다."); return; }
+
+  let activeIdx = 0;
+  // Mode auto-detected from the first sheet's headers (split if L1/L2/... pattern found).
+  let mode = detectImportMode(sheets[0].headers);
+  let mapping = autoDetectMapping(sheets[0].headers, mode);
+
+  // ── DOM scaffold ──
+  const backdrop = el("div", { class: "modal-backdrop" });
+  const card = el("div", { class: "modal-card", onclick: e => e.stopPropagation() });
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  // Esc closes the modal — quick keyboard exit alongside the X / Cancel buttons.
+  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  document.addEventListener("keydown", onKey);
+  // NOTE: backdrop click does NOT close — explicit X / Cancel / Esc only (matches vk8s
+  // policy so accidental mouse-drifts don't drop the user's mapping work).
+
+  // Top-right close (×) — same dismiss as Cancel, mirrors common modal UX.
+  card.appendChild(el("button", {
+    class: "modal-close",
+    type: "button",
+    title: "닫기 (Esc)",
+    "aria-label": "닫기",
+    onclick: close,
+  }, ["×"]));
+
+  card.appendChild(el("h2", {}, ["Excel Import — 컬럼 매핑"]));
+  card.appendChild(el("div", { class: "modal-hint" }, [
+    `'${fileName}' — 양식이 WBS 표준과 다르거나 사용자 정의 양식입니다.`,
+    el("br"),
+    `왼쪽이 WBS 필드, 오른쪽이 소스(Excel) 컬럼. * 표시는 필수.`,
+  ]));
+
+  // ── Mode toggle: single column vs L1~L4 split columns ──
+  const modeBox = el("div", {
+    style: { display: "flex", gap: "8px", margin: "12px 0 8px", alignItems: "center" },
+  });
+  modeBox.appendChild(el("label", {
+    style: { fontSize: "10px", color: "var(--fc-ink-3)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, minWidth: "80px" },
+  }, ["Mode"]));
+  const mkModeBtn = (id, label, sub) => el("button", {
+    class: "top-btn" + (mode === id ? " primary" : ""),
+    style: { padding: "5px 10px", fontSize: "11px", display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.25 },
+    onclick: () => {
+      if (mode === id) return;
+      mode = id;
+      mapping = autoDetectMapping(sheets[activeIdx].headers, mode);
+      // Re-style buttons
+      modeBox.querySelectorAll("button").forEach(b => b.classList.toggle("primary", b.dataset.mode === mode));
+      rebuildBody();
+    },
+    dataset: { mode: id },
+  }, [
+    el("span", { style: { fontWeight: 700 } }, [label]),
+    el("span", { style: { fontSize: "10px", opacity: 0.75 } }, [sub]),
+  ]);
+  modeBox.appendChild(mkModeBtn("single", "단일 업무명 컬럼", "Level + 한 컬럼"));
+  modeBox.appendChild(mkModeBtn("split",  "L1~L4 분리 컬럼", "레벨별 한 컬럼"));
+  card.appendChild(modeBox);
+
+  // ── Sheet picker / Header rows ── (kept in sync via shared helpers)
+  const activeSheet = () => sheets[activeIdx];
+  const sheetSummary = (s) => `${s.name} — ${s.dataRowCount}행 × ${s.headers.length}열`;
+
+  let sheetSel = null;
+  let sheetReadonlyDiv = null;
+  if (sheets.length > 1) {
+    sheetSel = el("select", {
+      onchange: e => {
+        activeIdx = parseInt(e.target.value);
+        const detected = detectImportMode(activeSheet().headers);
+        if (detected !== mode) {
+          mode = detected;
+          syncModeButtons();
+        }
+        mapping = autoDetectMapping(activeSheet().headers, mode);
+        syncHdrButtons();
+        rebuildBody();
+      },
+    }, sheets.map((s, i) => el("option", { value: i, selected: i === activeIdx ? "" : null },
+      [sheetSummary(s)])));
+    card.appendChild(el("div", { class: "modal-field" }, [
+      el("label", {}, ["Sheet"]),
+      sheetSel,
+    ]));
+  } else {
+    sheetReadonlyDiv = el("div", {
+      style: { fontSize: "12px", color: "var(--fc-ink-2)", fontFamily: "var(--fc-font-mono)" },
+    }, [sheetSummary(sheets[0])]);
+    card.appendChild(el("div", { class: "modal-field" }, [
+      el("label", {}, ["Sheet"]),
+      sheetReadonlyDiv,
+    ]));
+  }
+  const syncSheetSummary = () => {
+    if (sheetSel) {
+      const opt = sheetSel.querySelector(`option[value="${activeIdx}"]`);
+      if (opt) opt.textContent = sheetSummary(activeSheet());
+    } else if (sheetReadonlyDiv) {
+      sheetReadonlyDiv.textContent = sheetSummary(activeSheet());
+    }
+  };
+
+  // ── Header rows control: 1 or 2. Default is the auto-detected value per sheet. ──
+  // Many templates use a 2-row header (e.g. "일정" merged over "시작"/"종료").
+  const hdrBtnGroup = el("div", { style: { display: "flex", gap: "4px" } });
+  const mkHdrBtn = (n, label) => el("button", {
+    class: "top-btn" + (activeSheet().headerRowCount === n ? " primary" : ""),
+    style: { padding: "5px 12px", fontSize: "11px", fontFamily: "var(--fc-font-mono)" },
+    dataset: { hdr: String(n) },
+    onclick: () => {
+      if (activeSheet().headerRowCount === n) return;
+      remakeSheetMeta(activeSheet(), n);
+      // Headers changed → re-detect mode + mapping.
+      const detected = detectImportMode(activeSheet().headers);
+      if (detected !== mode) {
+        mode = detected;
+        syncModeButtons();
+      }
+      mapping = autoDetectMapping(activeSheet().headers, mode);
+      syncHdrButtons();
+      syncSheetSummary();
+      rebuildBody();
+    },
+  }, [label]);
+  hdrBtnGroup.appendChild(mkHdrBtn(1, "1 row"));
+  hdrBtnGroup.appendChild(mkHdrBtn(2, "2 rows"));
+  const hdrHint = el("span", {
+    style: { fontSize: "10px", color: "var(--fc-ink-3)", fontStyle: "italic" },
+  }, ["병합된 상단 셀(예: '일정')은 자동으로 하위 셀과 합쳐집니다 — '일정 / 시작'"]);
+  card.appendChild(el("div", { class: "modal-field" }, [
+    el("label", {}, ["Header rows"]),
+    hdrBtnGroup,
+    hdrHint,
+  ]));
+
+  function syncHdrButtons() {
+    hdrBtnGroup.querySelectorAll("button").forEach(b =>
+      b.classList.toggle("primary", b.dataset.hdr === String(activeSheet().headerRowCount)));
+  }
+  function syncModeButtons() {
+    modeBox.querySelectorAll("button").forEach(b =>
+      b.classList.toggle("primary", b.dataset.mode === mode));
+  }
+
+  const body = el("div");
+  card.appendChild(body);
+
+  // Status text shown if mapping is incomplete
+  const importBtn = el("button", { class: "top-btn primary" }, ["Import"]);
+  const cancelBtn = el("button", { class: "top-btn", onclick: close }, ["Cancel"]);
+
+  function rebuildBody() {
+    body.innerHTML = "";
+    const sheet = sheets[activeIdx];
+    const targets = mode === "split" ? COLUMN_MAP_SPLIT : COLUMN_MAP_SINGLE;
+
+    // Mapping grid
+    body.appendChild(el("div", { class: "map-section-title" }, ["컬럼 매핑"]));
+    const grid = el("div", { class: "map-grid" });
+    for (const target of targets) {
+      const sel = el("select", {
+        onchange: e => {
+          mapping[target.key] = parseInt(e.target.value);
+          updatePreview();
+        },
+      }, [
+        el("option", { value: -1, selected: mapping[target.key] === -1 ? "" : null }, ["— (사용 안함)"]),
+        ...sheet.headers.map((h, i) => el("option", {
+          value: i, selected: mapping[target.key] === i ? "" : null,
+        }, [`${excelColumnLetter(i)}. ${h || "(빈 헤더)"}`])),
+      ]);
+      grid.appendChild(el("div", { class: "map-target" }, [
+        target.label,
+        target.required ? el("span", { class: "req" }, ["*"]) : null,
+      ]));
+      grid.appendChild(sel);
+    }
+    body.appendChild(grid);
+
+    // Preview
+    body.appendChild(el("div", { class: "map-section-title" }, ["미리보기 (처음 5 행)"]));
+    const previewWrap = el("div", { id: "preview-wrap" });
+    body.appendChild(previewWrap);
+    updatePreview();
+  }
+
+  function updatePreview() {
+    const wrap = card.querySelector("#preview-wrap");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    const sheet = sheets[activeIdx];
+    const sampleRows = sheet.dataRows.slice(0, 5); // first 5 data rows (header already stripped)
+    if (sampleRows.length === 0) {
+      wrap.appendChild(el("div", {
+        style: { fontSize: "11px", color: "var(--fc-ink-3)", fontStyle: "italic" },
+      }, ["데이터 행이 없습니다."]));
+      return;
+    }
+    // Preview columns: always show the resolved Level + Name first, then the rest.
+    // In split mode "Level" and "WBS / 업무명" are derived per row; in single mode they
+    // come directly from the mapped columns.
+    const resolvedCols = ["Level", "WBS / 업무명", "RFP No.", "담당자", "산출물", "상태", "시작일", "완료일"];
+    const resolveRow = (r) => {
+      const out = {};
+      const get = (key) => mapping[key] >= 0 && r ? r[mapping[key]] : undefined;
+      if (mode === "split") {
+        let lv = 0, name = "";
+        for (let n = 1; n <= 4; n++) {
+          const idx = mapping[`l${n}`];
+          if (idx == null || idx < 0) continue;
+          const v = String(r?.[idx] ?? "").trim();
+          if (v) { lv = n; name = v; }
+        }
+        out["Level"] = lv || "—";
+        out["WBS / 업무명"] = name || "—";
+      } else {
+        const lvRaw = parseInt(get("level"));
+        out["Level"] = Number.isFinite(lvRaw) ? lvRaw : "—";
+        const nm = String(get("wbs") ?? "").trim();
+        out["WBS / 업무명"] = nm || "—";
+      }
+      out["RFP No."]  = String(get("rfp")      ?? "").trim() || "—";
+      out["담당자"]   = String(get("assignee") ?? "").trim() || "—";
+      out["산출물"]   = String(get("deliv")    ?? "").trim() || "—";
+      out["상태"]     = String(get("status")   ?? "").trim() || "—";
+      const sv = get("start"); out["시작일"] = (sv instanceof Date ? excelCellToISODate(sv) : String(sv ?? "").trim()) || "—";
+      const ev = get("end");   out["완료일"] = (ev instanceof Date ? excelCellToISODate(ev) : String(ev ?? "").trim()) || "—";
+      return out;
+    };
+
+    const table = el("table", { class: "preview-table" });
+    table.appendChild(el("thead", {}, [
+      el("tr", {}, resolvedCols.map(c => el("th", {}, [c]))),
+    ]));
+    const tbody = el("tbody");
+    for (const r of sampleRows) {
+      const v = resolveRow(r);
+      tbody.appendChild(el("tr", {}, resolvedCols.map(c =>
+        el("td", { title: String(v[c]) }, [String(v[c])]))));
+    }
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+  }
+
+  importBtn.addEventListener("click", () => {
+    const sheet = sheets[activeIdx];
+    // Required-field validation depends on mode.
+    if (mode === "split") {
+      if ((mapping.l1 ?? -1) < 0) {
+        alert("'L1 (대분류)' 컬럼은 필수입니다. 매핑해주세요.");
+        return;
+      }
+    } else {
+      if ((mapping.wbs ?? -1) < 0) {
+        alert("'WBS / 업무명' 컬럼은 필수입니다. 매핑해주세요.");
+        return;
+      }
+    }
+    const tasks = buildTasksFromMapping(sheet.dataRows, mapping, mode);
+    if (tasks.length === 0) {
+      alert(mode === "split"
+        ? "이 매핑으로 import할 행이 없습니다 (L1~L4가 모두 비어 있는 행만 존재)."
+        : "이 매핑으로 import할 행이 없습니다 (WBS / 업무명이 모두 비어 있음).");
+      return;
+    }
+    state.project = {
+      version: SCHEMA_VERSION,
+      name: (sheet.name && sheet.name !== "WBS")
+        ? sheet.name
+        : (state.project.name || (fileName || "imported").replace(/\.[^.]+$/, "")),
+      tasks,
+    };
+    emit(); saveSoon();
+    $("#saveStatus").textContent = `${tasks.length}건 import됨 (custom mapping · ${mode})`;
+    setTimeout(() => { if (/import됨/.test($("#saveStatus").textContent)) $("#saveStatus").textContent = ""; }, 2000);
+    close();
+  });
+  card.appendChild(el("div", { class: "modal-actions" }, [cancelBtn, importBtn]));
+
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+  rebuildBody();
+}
+
+// Build task tree from a sheet by Level + row order (preorder).
+//   levelStack[lv] = id of the most recent task at level lv → parent of next task at lv+1.
+function sheetRowsToTasks(headers, rows) {
+  const colIdx = Object.fromEntries(EXCEL_HEADERS.map(h => [h, headers.indexOf(h)]));
+  const cell = (row, name) => {
+    const i = colIdx[name];
+    return i >= 0 ? row[i] : undefined;
+  };
+  const out = [];
+  const lastAtLevel = {};
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || r.length === 0) continue;
+    const rawLv = cell(r, "Level");
+    const lv = Math.max(1, Math.min(4, parseInt(rawLv) || 1));
+    // WBS column carries the indented name — strip leading spaces.
+    const nameRaw = String(cell(r, "WBS") ?? "").replace(/^\s+/, "").trim();
+    const rfp = String(cell(r, "RFP No.") ?? "").trim();
+    const assignee = String(cell(r, "담당자") ?? "").trim();
+    const deliv = String(cell(r, "산출물") ?? "").trim();
+    const statusLabel = String(cell(r, "상태") ?? "").trim();
+    const progRaw = cell(r, "진행률");
+    // Skip rows that look completely empty.
+    if (!nameRaw && !rfp && !assignee && !deliv && !statusLabel) continue;
+    const parentId = lv > 1 ? (lastAtLevel[lv - 1] || null) : null;
+    const status = STATUS_VALUE_BY_LABEL[statusLabel] || "not-started";
+    const t = {
+      id: genId(),
+      parent_id: parentId,
+      level: lv,
+      name: nameRaw,
+      rfp_no: rfp,
+      assignee,
+      deliverable: deliv,
+      status,
+      progress: progressForStatus(status, parsePctValue(progRaw)),
+      start_date: excelCellToISODate(cell(r, "시작일")),
+      end_date: excelCellToISODate(cell(r, "완료일")),
+      expanded: true,
+    };
+    out.push(t);
+    lastAtLevel[lv] = t.id;
+    // Invalidate deeper levels; a new branch starts fresh.
+    for (let k = lv + 1; k <= 4; k++) delete lastAtLevel[k];
+  }
+  return out;
+}
+
+async function importExcel(file) {
+  let XLSX;
+  $("#saveStatus").textContent = "엑셀 읽는중…";
+  try {
+    XLSX = await import("https://esm.sh/xlsx@0.18.5");
+  } catch (err) {
+    $("#saveStatus").textContent = "";
+    alert("Excel 라이브러리 로드 실패 (네트워크?).\n\n" + err.message);
+    return;
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array", cellDates: true });
+
+    // Classify every sheet as match / partial / non-matching by checking header row.
+    const matching = [];
+    const partial = [];
+    const other = [];
+    for (const sheetName of wb.SheetNames) {
+      const sheet = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
+      if (!rows.length) { other.push({ name: sheetName, why: "빈 시트" }); continue; }
+      const headers = rows[0].map(h => String(h ?? "").trim());
+      const have = new Set(headers);
+      const missing = EXCEL_HEADERS.filter(h => !have.has(h));
+      if (missing.length === 0) {
+        matching.push({ name: sheetName, headers, rows });
+      } else if (missing.length <= 2 && EXCEL_HEADERS.filter(h => have.has(h)).length >= EXCEL_HEADERS.length - 2) {
+        partial.push({ name: sheetName, missing });
+      } else {
+        other.push({ name: sheetName, why: "양식 불일치" });
+      }
+    }
+
+    if (matching.length === 0) {
+      $("#saveStatus").textContent = "";
+      // No canonical match → open the HITL mapping dialog. Build full sheet meta with
+      // auto-detected header row count so 2-row headers (merged "일정" / "시작·종료")
+      // are collapsed into single effective column names from the start.
+      const allSheets = wb.SheetNames.map(sheetName => {
+        const ws = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false });
+        const headerRowCount = detectHeaderRowCount(ws, rows);
+        return makeSheetMeta(sheetName, ws, rows, headerRowCount);
+      }).filter(s => s.headers.length > 0);
+
+      if (!allSheets.length) {
+        alert("⚠ 이 파일에는 헤더가 있는 시트가 없습니다.");
+        return;
+      }
+      openImportMappingDialog({ XLSX, wb, sheets: allSheets, fileName: file.name });
+      return;
+    }
+
+    const chosen = matching[0];
+    // Build warning about what was ignored.
+    const ignoredMsgs = [];
+    if (matching.length > 1) {
+      ignoredMsgs.push(`여러 시트가 양식과 일치 — 첫 번째 '${chosen.name}'만 import.\n무시: ${matching.slice(1).map(s => s.name).join(", ")}`);
+    }
+    if (partial.length) {
+      ignoredMsgs.push(`누락 컬럼 있는 시트는 무시: ${partial.map(p => `${p.name}(누락: ${p.missing.join(",")})`).join(" · ")}`);
+    }
+    if (other.length) {
+      ignoredMsgs.push(`양식과 무관한 시트는 무시: ${other.map(o => o.name).join(", ")}`);
+    }
+    if (ignoredMsgs.length) alert("⚠ " + ignoredMsgs.join("\n\n"));
+
+    const tasks = sheetRowsToTasks(chosen.headers, chosen.rows);
+    if (tasks.length === 0) {
+      $("#saveStatus").textContent = "";
+      alert(`'${chosen.name}' 시트의 양식은 맞지만 import할 행이 없습니다.`);
+      return;
+    }
+    state.project = {
+      version: SCHEMA_VERSION,
+      name: chosen.name && chosen.name !== "WBS" ? chosen.name : (state.project.name || "imported"),
+      tasks,
+    };
+    emit(); saveSoon();
+    $("#saveStatus").textContent = `${tasks.length}건 import됨`;
+    setTimeout(() => { if (/import됨$/.test($("#saveStatus").textContent)) $("#saveStatus").textContent = ""; }, 1800);
+  } catch (err) {
+    console.error(err);
+    $("#saveStatus").textContent = "";
+    alert("Excel Import 실패: " + err.message);
+  }
+}
+
+//============ Init ============
+function init() {
+  // Apply persisted column widths before first render so the layout doesn't flash defaults.
+  loadColumnWidths();
+  state.project = loadProject() || newProject();
+
+  // Top bar
+  $("#projectName").addEventListener("input", e => {
+    state.project.name = e.target.value;
+    saveSoon();
+  });
+  $("#btnAddRoot").addEventListener("click", () => addTask(null));
+  $("#btnImport").addEventListener("click", () => $("#fileImport").click());
+  $("#fileImport").addEventListener("change", e => {
+    const f = e.target.files[0];
+    if (f) importProject(f);
+    e.target.value = "";
+  });
+  // Export — single button opens a popover; the menu item dispatches to the right fn.
+  const exportBtn = $("#btnExport");
+  const exportMenu = $("#exportMenu");
+  const setMenuOpen = (open) => {
+    exportMenu.hidden = !open;
+    exportBtn.setAttribute("aria-expanded", String(!!open));
+  };
+  exportBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setMenuOpen(exportMenu.hidden);
+  });
+  exportMenu.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-fmt]");
+    if (!btn) return;
+    setMenuOpen(false);
+    const fmt = btn.dataset.fmt;
+    if      (fmt === "xlsx") exportExcel();
+    else if (fmt === "json") exportJson();
+    else if (fmt === "pdf")  exportPdf();
+  });
+  document.addEventListener("click", (e) => {
+    if (!exportMenu.hidden && !e.target.closest(".export-wrap")) setMenuOpen(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !exportMenu.hidden) setMenuOpen(false);
+  });
+  $("#btnReport").addEventListener("click", () => {
+    state.view = state.view === "report" ? "wbs" : "report";
+    emit();
+  });
+
+  // Status filter buttons (완료/진행중/지연) — same-button click toggles back to "all".
+  document.querySelectorAll(".toolbar .stat-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const f = btn.dataset.statusFilter;
+      state.filter.status = state.filter.status === f ? "all" : f;
+      emit();
+    });
+  });
+
+  // Assignee filter
+  $("#assigneeFilter").addEventListener("input", e => {
+    state.filter.assignee = e.target.value.trim();
+    emit();
+  });
+  $("#assigneeFilterClear").addEventListener("click", () => {
+    $("#assigneeFilter").value = "";
+    state.filter.assignee = "";
+    $("#assigneeFilter").focus();
+    emit();
+  });
+
+  // Kick off holiday data fetch (report view re-renders when it resolves).
+  loadHolidays();
+
+  // Zoom buttons
+  document.querySelectorAll(".zoom button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const px = parseInt(btn.dataset.zoom);
+      document.documentElement.style.setProperty("--day-w", px + "px");
+      document.querySelectorAll(".zoom button").forEach(b => b.classList.toggle("active", b === btn));
+      emit();
+    });
+  });
+
+  subscribe(render);
+  emit();
+}
+
+document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>
