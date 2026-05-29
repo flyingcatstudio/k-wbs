@@ -2279,8 +2279,10 @@ function renderTaskRow(t, rangeStart, dayW, ganttW, todayOffset, holidayPosition
   // Progress cell. Editable only while in-progress; not-started/completed are auto-locked
   // to 0/100, and blocked/on-hold freeze whatever value was reached. The cell has a thin
   // bar background under the input that fills proportionally for quick visual scanning.
-  const progressVal = progressForStatus(t.status, t.progress);
-  const progressEditable = isProgressEditable(t.status);
+  // Parents derive their progress from leaf descendants (effectiveProgress), and the input is
+  // locked — editing it would be confusing since the value would be overwritten on next render.
+  const progressVal = effectiveProgress(t);
+  const progressEditable = !hasChildrenFlag && isProgressEditable(t.status);
   const progressCell = el("div", { class: "cell progress-cell", dataset: { colKey: "progress" } }, [
     el("div", { class: "progress-track" }, [
       el("div", {
@@ -2295,11 +2297,12 @@ function renderTaskRow(t, rangeStart, dayW, ganttW, todayOffset, holidayPosition
       readOnly: progressEditable ? null : "",
       title: progressEditable
         ? "0–100 사이 정수. 5 단위 휠 조절 또는 직접 입력"
+        : hasChildrenFlag           ? "하위 작업들의 진행률 평균 — 자동 집계 (직접 수정 불가)"
         : t.status === "completed"  ? "완료 상태 — 100% 고정 (상태를 '진행중'으로 바꾸면 수정 가능)"
         : t.status === "not-started" ? "시작 전 — 0% 고정 (상태를 '진행중'으로 바꾸면 수정 가능)"
         : "현재 상태에서는 진행률 직접 수정 불가",
       oninput: e => {
-        if (!isProgressEditable(t.status)) return;
+        if (!progressEditable) return;
         const v = clampProgress(e.target.value);
         updateTask(t.id, { progress: v });
       },
@@ -2442,10 +2445,20 @@ function timeProgressPct(start, end, today) {
   return Math.round(elapsed / total * 100);
 }
 
+// Canonical "what progress should this task display" — parents roll up from their leaf
+// descendants (matching how `effectiveStatus` rolls up), leaves use their stored value with a
+// time-based fallback when explicitly in-progress but the user hasn't recorded a number yet.
 function effectiveProgress(t, today) {
+  if (hasChildren(t.id)) {
+    const desc = descendantsOf(t.id);
+    const leaves = desc.filter(d => !hasChildren(d.id));
+    if (!leaves.length) return progressForStatus(t.status, t.progress);
+    const sum = leaves.reduce((acc, l) => acc + progressForStatus(l.status, l.progress), 0);
+    return Math.round(sum / leaves.length);
+  }
   if (t.status === "in-progress" && (t.progress || 0) === 0) {
     const { start, end } = taskDateRange(t);
-    return timeProgressPct(start, end, today);
+    return timeProgressPct(start, end, today || todayUTC());
   }
   return progressForStatus(t.status, t.progress);
 }
@@ -2675,7 +2688,7 @@ async function exportExcel() {
     "담당자":   t.assignee || "",
     "산출물":   t.deliverable || "",
     "상태":     STATUS_LABEL[t.status] || t.status || "",
-    "진행률":   progressForStatus(t.status, t.progress),
+    "진행률":   effectiveProgress(t),
     "시작일":   t.start_date || "",
     "완료일":   t.end_date || "",
   }));
@@ -2797,7 +2810,7 @@ function exportPdf() {
       el2("td", { style: { paddingLeft: (8 + (t.level - 1) * 14) + "px" } }, [`L${t.level} ${t.name || ""}`]),
       el2("td", {}, [t.assignee || ""]),
       el2("td", { class: "num" }, [STATUS_LABEL[eff] || eff || ""]),
-      el2("td", { class: "num" }, [progressForStatus(t.status, t.progress) + "%"]),
+      el2("td", { class: "num" }, [effectiveProgress(t) + "%"]),
       el2("td", { class: "num" }, [t.start_date || ""]),
       el2("td", { class: "num" }, [t.end_date || ""]),
     ]);
