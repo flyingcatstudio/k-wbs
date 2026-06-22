@@ -1609,13 +1609,17 @@ function emit() { state.listeners.forEach(fn => { try { fn(); } catch (e) { cons
 function subscribe(fn) { state.listeners.add(fn); return () => state.listeners.delete(fn); }
 
 let saveTimer = null;
-function saveSoon() {
-  $("#saveStatus").textContent = "saving…";
+// quiet=true persists without touching the visible "saving…/saved" status — used
+// while an inline field is being typed so the status doesn't flash on every keystroke.
+function saveSoon(quiet = false) {
+  if (!quiet) $("#saveStatus").textContent = "saving…";
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state.project));
-    $("#saveStatus").textContent = "saved";
-    setTimeout(() => { if ($("#saveStatus").textContent === "saved") $("#saveStatus").textContent = ""; }, 1200);
+    if (!quiet) {
+      $("#saveStatus").textContent = "saved";
+      setTimeout(() => { if ($("#saveStatus").textContent === "saved") $("#saveStatus").textContent = ""; }, 1200);
+    }
   }, 400);
 }
 
@@ -1789,6 +1793,17 @@ function updateTask(id, patch) {
     t.progress = clampProgress(t.progress);
   }
   emit(); saveSoon();
+}
+
+// Update one task field in memory and persist quietly — NO emit(), so the focused
+// input is NOT torn down by a re-render mid-typing. Inline text editors call this on
+// every keystroke; the visible re-render + "saved" status are deferred to commit
+// (blur / Enter / clicking elsewhere), where updateTask() runs in full.
+function updateTaskField(id, key, value) {
+  const t = findTask(id);
+  if (!t) return;
+  t[key] = value;
+  saveSoon(true);
 }
 
 // Split an assignee cell string into individual names. Supports the common Korean/English
@@ -1983,6 +1998,25 @@ function el(tag, attrs, children) {
     }
   }
   return node;
+}
+
+// Inline text editor that commits on completion, not on every keystroke. While the
+// user types, the model is updated quietly (persist only, no re-render) so the focused
+// input survives. The visible re-render + "saved" status fire only when editing ends:
+//   • blur (click/tap elsewhere) or Tab → native `change` event
+//   • Enter → blur() → `change` event
+// The Enter handler ignores `isComposing` so confirming a Hangul block with Enter does
+// not prematurely commit. If a browser's IME quirk lets that Enter slip through, the
+// blur path still commits cleanly — it's the reliable backstop, Enter is convenience.
+function inlineTextInput(taskId, key, { class: className, value, placeholder }) {
+  return el("input", {
+    class: className,
+    value: value,
+    placeholder: placeholder,
+    oninput: e => updateTaskField(taskId, key, e.target.value),
+    onchange: e => updateTask(taskId, { [key]: e.target.value }),
+    onkeydown: e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); e.target.blur(); } },
+  });
 }
 
 //============ Render ============
@@ -2185,11 +2219,10 @@ function renderTaskRow(t, rangeStart, dayW, ganttW, todayOffset, holidayPosition
     onclick: () => updateTask(t.id, { expanded: !t.expanded }),
   }, [hasChildrenFlag ? (t.expanded === false ? "▶" : "▼") : "•"]);
 
-  const nameInput = el("input", {
+  const nameInput = inlineTextInput(t.id, "name", {
     class: "name-input",
     value: t.name,
     placeholder: `Level ${t.level} 업무`,
-    oninput: e => updateTask(t.id, { name: e.target.value }),
   });
 
   const actions = el("span", { class: "row-actions" }, [
@@ -2235,32 +2268,17 @@ function renderTaskRow(t, rangeStart, dayW, ganttW, todayOffset, holidayPosition
 
   // RFP cell
   const rfpCell = el("div", { class: "cell", dataset: { colKey: "rfp" } }, [
-    el("input", {
-      class: "text-input rfp",
-      value: t.rfp_no,
-      placeholder: "—",
-      oninput: e => updateTask(t.id, { rfp_no: e.target.value }),
-    }),
+    inlineTextInput(t.id, "rfp_no", { class: "text-input rfp", value: t.rfp_no, placeholder: "—" }),
   ]);
 
   // Assignee cell
   const assigneeCell = el("div", { class: "cell", dataset: { colKey: "assignee" } }, [
-    el("input", {
-      class: "text-input",
-      value: t.assignee,
-      placeholder: "—",
-      oninput: e => updateTask(t.id, { assignee: e.target.value }),
-    }),
+    inlineTextInput(t.id, "assignee", { class: "text-input", value: t.assignee, placeholder: "—" }),
   ]);
 
   // Deliverable cell
   const delivCell = el("div", { class: "cell", dataset: { colKey: "deliv" } }, [
-    el("input", {
-      class: "text-input",
-      value: t.deliverable,
-      placeholder: "—",
-      oninput: e => updateTask(t.id, { deliverable: e.target.value }),
-    }),
+    inlineTextInput(t.id, "deliverable", { class: "text-input", value: t.deliverable, placeholder: "—" }),
   ]);
 
   // Status cell — leaves are editable; parents show a derived status auto-summarised
