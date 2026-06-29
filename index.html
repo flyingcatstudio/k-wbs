@@ -58,6 +58,15 @@
     --col-progress-w: 96px;
     --col-start-w: 124px;
     --col-end-w: 124px;
+    /* Live grid track list for .grid-row — rebuilt by applyGridColumns() from the
+       set of *visible* columns (RESIZABLE_COLUMNS minus hidden/deleted) so hiding or
+       deleting a column collapses its track instead of leaving a gap. The default here
+       lists all 8 data columns + Gantt so the very first paint (before JS runs) is
+       correct. */
+    --grid-cols:
+      var(--col-name-w) var(--col-rfp-w) var(--col-assignee-w) var(--col-deliv-w)
+      var(--col-status-w) var(--col-progress-w) var(--col-start-w) var(--col-end-w)
+      var(--gantt-w, 1fr);
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -338,18 +347,9 @@
   }
   .grid-row {
     display: grid;
-    grid-template-columns:
-      var(--col-name-w)
-      var(--col-rfp-w)
-      var(--col-assignee-w)
-      var(--col-deliv-w)
-      var(--col-status-w)
-      var(--col-progress-w)
-      var(--col-start-w)
-      var(--col-end-w)
-      var(--gantt-w, 1fr);   /* Gantt column uses its actual chart width (set by JS)
-                                so the timeline can be wider than the viewport and
-                                the .wbs container scrolls horizontally. */
+    grid-template-columns: var(--grid-cols);   /* track list (incl. Gantt) is built in JS
+                                so hidden/deleted columns collapse cleanly and the timeline
+                                can be wider than the viewport with horizontal scroll. */
     /* Size the row's bounding box to the full grid track sum (not just .wbs's width).
        Without this, position:sticky cells get pushed off-screen near max horizontal
        scroll because their containing block stops at the row's narrower bbox. */
@@ -455,6 +455,72 @@
   .cell[data-col-key="progress"].col-pinned { left: var(--sticky-left-progress, 0px); }
   .cell[data-col-key="start"].col-pinned    { left: var(--sticky-left-start, 0px); }
   .cell[data-col-key="end"].col-pinned      { left: var(--sticky-left-end, 0px); }
+
+  /* Column header context menu — opened by right-clicking a column header. Floating
+     panel positioned at the cursor by openColumnMenu(); a single flat list holds
+     숨김 / 삭제 plus an inline "숨김 해제" section listing currently-hidden columns. */
+  .col-menu {
+    position: fixed;
+    z-index: 1000;
+    min-width: 200px;
+    max-width: 280px;
+    padding: 5px;
+    background: var(--fc-surface-3);
+    border: 1px solid var(--fc-line-2);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.55);
+    font-size: 12.5px;
+    color: var(--fc-ink-2);
+    user-select: none;
+  }
+  .col-menu-title {
+    padding: 6px 10px 7px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fc-ink-4);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .col-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .col-menu-item:hover:not(:disabled),
+  .col-menu-item:focus-visible:not(:disabled) {
+    background: var(--fc-accent);
+    color: #fff;
+    outline: none;
+  }
+  .col-menu-item:disabled { opacity: 0.38; cursor: default; }
+  .col-menu-item.danger:hover:not(:disabled) { background: var(--fc-danger); }
+  .col-menu-item .mi-ico { width: 14px; text-align: center; flex: 0 0 auto; opacity: 0.85; }
+  .col-menu-sep { height: 1px; margin: 5px 6px; background: var(--fc-line); }
+  .col-menu-label {
+    padding: 5px 10px 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fc-ink-4);
+  }
+
+  /* Undo/redo toolbar buttons share .top-btn styling; just disable affordance. */
+  .top-btn:disabled { opacity: 0.35; cursor: default; }
+  .top-btn.icon-btn { padding: 7px 10px; font-size: 14px; line-height: 1; }
 
   /* Body rows */
   .task-row { background: transparent; transition: background .12s; }
@@ -1234,6 +1300,7 @@
   /* ───── Report view ───── */
   body[data-view="report"] .toolbar { display: none; }
   body[data-view="report"] #btnAddRoot,
+  body[data-view="report"] #btnNew,
   body[data-view="report"] #btnImport,
   body[data-view="report"] .export-wrap { display: none; }
 
@@ -1367,8 +1434,11 @@
   <input id="projectName" class="project-name" value="새 프로젝트" />
   <span class="save-status" id="saveStatus"></span>
   <span class="spacer"></span>
+  <button class="top-btn icon-btn" id="btnUndo" title="실행취소 (Ctrl/⌘+Z)" aria-label="실행취소" disabled>↶</button>
+  <button class="top-btn icon-btn" id="btnRedo" title="다시실행 (Ctrl/⌘+Shift+Z)" aria-label="다시실행" disabled>↷</button>
   <button class="top-btn primary" id="btnAddRoot">＋ Level 1 업무</button>
   <button class="top-btn" id="btnReport">📊 Report</button>
+  <button class="top-btn" id="btnNew">🗒 새로 만들기</button>
   <button class="top-btn" id="btnImport">⤓ Import</button>
   <div class="export-wrap">
     <button class="top-btn" id="btnExport" aria-haspopup="menu" aria-expanded="false">⤒ Export</button>
@@ -1413,16 +1483,20 @@ const WBS_COLWIDTHS_KEY = "k-wbs.col-widths";
 
 // Resizable data columns (NOT the Gantt — that one stays `1fr` flex).
 // `cssVar` maps to the CSS custom property used by .grid-row's grid-template-columns.
+// `field` = the task property this column edits (used when 삭제 wipes the column's data).
+// `protected: true` = the column can't be hidden or deleted (name is the task's identity).
 const RESIZABLE_COLUMNS = [
-  { key: "name",     cssVar: "--col-name-w",     label: "업무명",   min: 160, default: 320 },
-  { key: "rfp",      cssVar: "--col-rfp-w",      label: "RFP No.", min: 60,  default: 96  },
-  { key: "assignee", cssVar: "--col-assignee-w", label: "담당자",  min: 60,  default: 108 },
-  { key: "deliv",    cssVar: "--col-deliv-w",    label: "산출물",  min: 80,  default: 144 },
-  { key: "status",   cssVar: "--col-status-w",   label: "상태",    min: 80,  default: 116 },
-  { key: "progress", cssVar: "--col-progress-w", label: "진행률",  min: 70,  default: 96  },
-  { key: "start",    cssVar: "--col-start-w",    label: "시작일",  min: 90,  default: 124 },
-  { key: "end",      cssVar: "--col-end-w",      label: "완료일",  min: 90,  default: 124 },
+  { key: "name",     cssVar: "--col-name-w",     label: "업무명",   min: 160, default: 320, field: "name",        protected: true },
+  { key: "rfp",      cssVar: "--col-rfp-w",      label: "RFP No.", min: 60,  default: 96,  field: "rfp_no"      },
+  { key: "assignee", cssVar: "--col-assignee-w", label: "담당자",  min: 60,  default: 108, field: "assignee"    },
+  { key: "deliv",    cssVar: "--col-deliv-w",    label: "산출물",  min: 80,  default: 144, field: "deliverable" },
+  { key: "status",   cssVar: "--col-status-w",   label: "상태",    min: 80,  default: 116, field: "status"      },
+  { key: "progress", cssVar: "--col-progress-w", label: "진행률",  min: 70,  default: 96,  field: "progress"    },
+  { key: "start",    cssVar: "--col-start-w",    label: "시작일",  min: 90,  default: 124, field: "start_date"  },
+  { key: "end",      cssVar: "--col-end-w",      label: "완료일",  min: 90,  default: 124, field: "end_date"    },
 ];
+const COLUMN_BY_KEY = Object.fromEntries(RESIZABLE_COLUMNS.map(c => [c.key, c]));
+function colMeta(key) { return COLUMN_BY_KEY[key]; }
 
 function loadColumnWidths() {
   try {
@@ -1497,7 +1571,10 @@ function currentColumnWidth(col) {
 function recomputeStickyOffsets() {
   const root = document.documentElement;
   let acc = 0;
-  for (const col of RESIZABLE_COLUMNS) {
+  // Only visible columns occupy grid tracks, so a pinned column's sticky-left offset is
+  // the running sum of *visible* columns to its left. A hidden/deleted column contributes
+  // no width (and can't be pinned), so iterating visibleColumns() keeps the math right.
+  for (const col of visibleColumns()) {
     const varName = `--sticky-left-${col.key}`;
     if (colSelection.has(col.key)) {
       root.style.setProperty(varName, acc + "px");
@@ -1582,6 +1659,307 @@ function attachRowSelector(rowEl, taskId) {
     toggleRowSelection(taskId, e.shiftKey);
   });
 }
+
+//============ Column visibility (hide / delete) ============
+// Two per-project lists drive which data columns render:
+//   • hiddenCols  — hidden from view, DATA PRESERVED. Restored via the "숨김 해제" menu.
+//   • deletedCols — removed from view AND the field's data wiped on every task
+//                   (spreadsheet-style delete). Recoverable only via undo.
+// Both live in state.project so they persist (autosave + JSON export) and are captured
+// by the undo snapshot. The "name" column is protected (task identity) and never enters
+// either list. visibleColumns() is the single source of truth that drives the grid track
+// list, the header cells, the body cells, and the sticky-pin offsets — keeping them in
+// lockstep so the grid can never drift out of alignment.
+
+// Normalize/repair a project's column lists (drops unknown or protected keys, de-dupes,
+// and lets a deleted column win over a hidden one). Called on every load/import/undo.
+function ensureColumnState(proj) {
+  if (!proj) return proj;
+  const valid = new Set(RESIZABLE_COLUMNS.map(c => c.key));
+  const keep = k => valid.has(k) && !(colMeta(k) && colMeta(k).protected);
+  const deleted = Array.isArray(proj.deletedCols) ? [...new Set(proj.deletedCols.filter(keep))] : [];
+  const delSet = new Set(deleted);
+  const hidden = Array.isArray(proj.hiddenCols)
+    ? [...new Set(proj.hiddenCols.filter(k => keep(k) && !delSet.has(k)))] : [];
+  proj.deletedCols = deleted;
+  proj.hiddenCols = hidden;
+  return proj;
+}
+
+function hiddenColSet()  { return new Set((state.project && state.project.hiddenCols)  || []); }
+function deletedColSet() { return new Set((state.project && state.project.deletedCols) || []); }
+
+function visibleColumns() {
+  if (!state.project) return RESIZABLE_COLUMNS;
+  const hidden = hiddenColSet(), deleted = deletedColSet();
+  return RESIZABLE_COLUMNS.filter(c => !hidden.has(c.key) && !deleted.has(c.key));
+}
+
+// Rebuild the .grid-row track list (--grid-cols) from the visible columns + Gantt so a
+// hidden/deleted column's track collapses instead of leaving an empty gap.
+function applyGridColumns() {
+  const tracks = visibleColumns().map(c => `var(${c.cssVar})`);
+  tracks.push("var(--gantt-w, 1fr)");
+  document.documentElement.style.setProperty("--grid-cols", tracks.join(" "));
+}
+
+// Drop pins for any column that's no longer visible (so a hidden/deleted column doesn't
+// linger in the sticky-offset math). Returns true if the selection changed.
+function reconcileColSelection() {
+  const visible = new Set(visibleColumns().map(c => c.key));
+  let changed = false;
+  for (const k of [...colSelection]) {
+    if (!visible.has(k)) { colSelection.delete(k); changed = true; }
+  }
+  return changed;
+}
+
+// The value a field is reset to when its column is deleted. Text → ""; progress → 0;
+// status → "not-started" (the natural "no status" default — "" would break the pill and
+// leave the Gantt bars colorless).
+function clearValueForField(field) {
+  if (field === "progress") return 0;
+  if (field === "status")   return "not-started";
+  return "";
+}
+
+function hideColumns(keys) {
+  if (!state.project) return;
+  const targets = keys.filter(k =>
+    colMeta(k) && !colMeta(k).protected &&
+    !state.project.hiddenCols.includes(k) && !state.project.deletedCols.includes(k));
+  if (!targets.length) return;
+  markBeforeChange();
+  for (const k of targets) { state.project.hiddenCols.push(k); colSelection.delete(k); }
+  flushHistory();
+  emit(); saveSoon();
+}
+
+function unhideColumns(keys) {
+  if (!state.project) return;
+  const set = new Set(keys);
+  const next = state.project.hiddenCols.filter(k => !set.has(k));
+  if (next.length === state.project.hiddenCols.length) return;
+  markBeforeChange();
+  state.project.hiddenCols = next;
+  flushHistory();
+  emit(); saveSoon();
+}
+
+function deleteColumns(keys) {
+  if (!state.project) return;
+  const targets = keys.filter(k =>
+    colMeta(k) && !colMeta(k).protected && !state.project.deletedCols.includes(k));
+  if (!targets.length) return;
+  markBeforeChange();
+  const hideSet = new Set(state.project.hiddenCols);
+  for (const k of targets) {
+    const meta = colMeta(k);
+    state.project.deletedCols.push(k);
+    hideSet.delete(k);          // a deleted column leaves the hidden list
+    colSelection.delete(k);
+    const clearVal = clearValueForField(meta.field);
+    for (const t of state.project.tasks) t[meta.field] = clearVal;
+  }
+  state.project.hiddenCols = [...hideSet];
+  flushHistory();
+  emit(); saveSoon();
+}
+
+//============ Undo / redo (app-wide snapshot history) ============
+// Snapshot-based: each discrete mutation deep-clones state.project BEFORE changing it and
+// pushes the clone onto `past`. Undo swaps current↔past; redo swaps current↔future. Column
+// ops + task add/delete/edit all flow through here. Inline text/number edits are grouped
+// into ONE undo step via markBeforeChange (captures the pre-edit clone on the first
+// keystroke) + flushHistory (commits it on blur/Enter). See keydown wiring in init().
+const HISTORY_LIMIT = 200;
+const history = { past: [], future: [], pendingBase: null };
+
+function cloneProject() { return JSON.parse(JSON.stringify(state.project)); }
+
+// Capture the pre-change snapshot if one isn't already pending. Safe to call repeatedly
+// inside a single logical edit (only the first call snapshots).
+function markBeforeChange() {
+  if (state.project && history.pendingBase == null) history.pendingBase = cloneProject();
+}
+
+// Commit the pending snapshot as one undo step and clear the redo stack.
+function flushHistory() {
+  if (history.pendingBase == null) return;
+  history.past.push(history.pendingBase);
+  if (history.past.length > HISTORY_LIMIT) history.past.shift();
+  history.pendingBase = null;
+  history.future.length = 0;
+  updateUndoButtons();
+}
+
+function resetHistory() {
+  history.past.length = 0;
+  history.future.length = 0;
+  history.pendingBase = null;
+  updateUndoButtons();
+}
+
+function updateUndoButtons() {
+  const u = $("#btnUndo"), r = $("#btnRedo");
+  if (u) u.disabled = !(history.past.length || history.pendingBase);
+  if (r) r.disabled = !history.future.length;
+}
+
+function undo() {
+  flushHistory();                  // fold any in-progress edit group into `past` first
+  if (!history.past.length) return;
+  history.future.push(cloneProject());
+  state.project = ensureColumnState(history.past.pop());
+  reconcileColSelection();
+  emit(); saveSoon(); updateUndoButtons();
+}
+
+function redo() {
+  if (!history.future.length) return;
+  history.past.push(cloneProject());
+  state.project = ensureColumnState(history.future.pop());
+  reconcileColSelection();
+  emit(); saveSoon(); updateUndoButtons();
+}
+
+//============ Column header context menu ============
+let colMenuEl = null;
+
+function closeColMenu() {
+  if (colMenuEl) { colMenuEl.remove(); colMenuEl = null; }
+  document.removeEventListener("mousedown", onColMenuOutside, true);
+  document.removeEventListener("keydown", onColMenuKey, true);
+  window.removeEventListener("blur", closeColMenu);
+  window.removeEventListener("resize", closeColMenu);
+  const wbs = $("#wbs"); if (wbs) wbs.removeEventListener("scroll", closeColMenu, true);
+}
+function onColMenuOutside(e) { if (colMenuEl && !colMenuEl.contains(e.target)) closeColMenu(); }
+function onColMenuKey(e) { if (e.key === "Escape") { e.stopPropagation(); closeColMenu(); } }
+
+function colMenuItem(label, { icon = "", disabled = false, danger = false, onClick } = {}) {
+  return el("button", {
+    type: "button",
+    class: "col-menu-item" + (danger ? " danger" : ""),
+    role: "menuitem",
+    disabled: disabled ? "" : null,
+    onclick: disabled ? null : onClick,
+  }, [icon ? el("span", { class: "mi-ico" }, [icon]) : null, label]);
+}
+
+//============ Column freeze (틀 고정) ============
+// Freeze the leading block of columns up to AND INCLUDING the chosen column so it stays
+// fixed on the left while the rest scroll horizontally. Reuses the existing pin machinery
+// (colSelection + position:sticky + recomputeStickyOffsets), so "여기까지 고정" is simply
+// "pin every visible column from the first through this one." In-memory only — a view
+// preference, like the click-to-pin it builds on (not persisted, not in undo history).
+function freezeUpToColumn(col) {
+  const vis = visibleColumns();
+  const idx = vis.findIndex(c => c.key === col.key);
+  if (idx < 0) return;
+  colSelection.clear();
+  for (let i = 0; i <= idx; i++) colSelection.add(vis[i].key);
+  applyColSelection();
+}
+function clearFreeze() {
+  if (!colSelection.size) return;
+  colSelection.clear();
+  applyColSelection();
+}
+
+function openColumnMenu(col, x, y) {
+  closeColMenu();
+  // Commit any in-progress inline edit so the column op is its own undo step.
+  const ae = document.activeElement;
+  if (ae && ae.matches && ae.matches("input, textarea, select")) ae.blur();
+
+  // Act on the whole pin-selection when the right-clicked column is part of a multi-set;
+  // otherwise just the clicked column. Protected columns (name) are filtered from actions.
+  const targetKeys = (colSelection.has(col.key) && colSelection.size > 1)
+    ? RESIZABLE_COLUMNS.filter(c => colSelection.has(c.key)).map(c => c.key)
+    : [col.key];
+  const actionable = targetKeys.filter(k => !colMeta(k).protected);
+  const labelOf = k => colMeta(k).label;
+  const titleText = targetKeys.length > 1 ? `${targetKeys.length}개 컬럼 선택됨` : labelOf(targetKeys[0]);
+  const countSuffix = actionable.length > 1 ? ` (${actionable.length}개)` : "";
+
+  const menu = el("div", { class: "col-menu", role: "menu" });
+  menu.appendChild(el("div", { class: "col-menu-title" }, [titleText]));
+
+  menu.appendChild(colMenuItem("숨김" + countSuffix, {
+    icon: "🙈",
+    disabled: actionable.length === 0,
+    onClick: () => { closeColMenu(); hideColumns(actionable); },
+  }));
+  menu.appendChild(colMenuItem("삭제" + countSuffix, {
+    icon: "🗑",
+    danger: true,
+    disabled: actionable.length === 0,
+    onClick: () => {
+      closeColMenu();
+      const names = actionable.map(labelOf).join(", ");
+      const msg = `'${names}' 컬럼${actionable.length > 1 ? ` ${actionable.length}개` : ""}을(를) 삭제하면 모든 업무의 해당 데이터가 비워집니다.\n계속할까요? (실행취소로 되돌릴 수 있습니다)`;
+      if (confirm(msg)) deleteColumns(actionable);
+    },
+  }));
+
+  // Freeze (틀 고정) — keep the leading columns up to & including the right-clicked column
+  // fixed on the left while the rest scroll right. Available on every column (incl. 업무명),
+  // and always targets the clicked column even inside a multi-selection.
+  menu.appendChild(el("div", { class: "col-menu-sep" }));
+  menu.appendChild(colMenuItem(`여기까지 고정 (${labelOf(col.key)})`, {
+    icon: "📌",
+    onClick: () => { closeColMenu(); freezeUpToColumn(col); },
+  }));
+  if (colSelection.size) {
+    menu.appendChild(colMenuItem("고정 해제", {
+      icon: "📍",
+      onClick: () => { closeColMenu(); clearFreeze(); },
+    }));
+  }
+
+  const hidden = (state.project && state.project.hiddenCols) || [];
+  if (hidden.length) {
+    menu.appendChild(el("div", { class: "col-menu-sep" }));
+    menu.appendChild(el("div", { class: "col-menu-label" }, ["숨김 해제"]));
+    for (const k of hidden) {
+      menu.appendChild(colMenuItem(labelOf(k), {
+        icon: "↩",
+        onClick: () => { closeColMenu(); unhideColumns([k]); },
+      }));
+    }
+    if (hidden.length > 1) {
+      menu.appendChild(colMenuItem("전체 숨김취소", {
+        icon: "↩",
+        onClick: () => { closeColMenu(); unhideColumns([...hidden]); },
+      }));
+    }
+  }
+
+  document.body.appendChild(menu);
+  colMenuEl = menu;
+  // Position at the cursor, clamped to the viewport.
+  const r = menu.getBoundingClientRect();
+  menu.style.left = Math.max(8, Math.min(x, window.innerWidth  - r.width  - 8)) + "px";
+  menu.style.top  = Math.max(8, Math.min(y, window.innerHeight - r.height - 8)) + "px";
+
+  // Defer wiring the dismiss listeners one tick so the opening event doesn't close it.
+  setTimeout(() => {
+    document.addEventListener("mousedown", onColMenuOutside, true);
+    document.addEventListener("keydown", onColMenuKey, true);
+    window.addEventListener("blur", closeColMenu);
+    window.addEventListener("resize", closeColMenu);
+    const wbs = $("#wbs"); if (wbs) wbs.addEventListener("scroll", closeColMenu, true);
+  }, 0);
+}
+
+function attachColumnMenu(cellEl, col) {
+  cellEl.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    openColumnMenu(col, e.clientX, e.clientY);
+  });
+}
+
 const SCHEMA_VERSION = "0.1";
 const STATUS_OPTIONS = [
   { value: "not-started", label: "대기" },
@@ -1603,6 +1981,11 @@ const state = {
   view: "wbs",          // "wbs" | "report" — ephemeral UI state, not persisted
   filter: { assignee: "", status: "all" }, // assignee + status filters — ephemeral UI state, not persisted
   listeners: new Set(),
+  // True when the current project has edits not yet exported to a FILE (.json/.xlsx).
+  // localStorage autosave keeps the browser copy fresh, but "새로 만들기"/Import overwrite
+  // that single copy — so anything not written to a file is the only thing truly at risk.
+  // Set on every mutation (saveSoon), cleared on a successful file export.
+  dirty: false,
 };
 
 function emit() { state.listeners.forEach(fn => { try { fn(); } catch (e) { console.error(e); } }); }
@@ -1612,6 +1995,7 @@ let saveTimer = null;
 // quiet=true persists without touching the visible "saving…/saved" status — used
 // while an inline field is being typed so the status doesn't flash on every keystroke.
 function saveSoon(quiet = false) {
+  state.dirty = true; // any mutation = unsaved-to-file work (see state.dirty note)
   if (!quiet) $("#saveStatus").textContent = "saving…";
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
@@ -1629,6 +2013,7 @@ function loadProject() {
   try {
     const proj = JSON.parse(raw);
     if (proj && Array.isArray(proj.tasks)) normalizeHierarchy(proj.tasks);
+    ensureColumnState(proj);   // backfill hiddenCols/deletedCols for older saves
     return proj;
   } catch { return null; }
 }
@@ -1663,6 +2048,8 @@ function newProject(name) {
     version: SCHEMA_VERSION,
     name: name || "새 프로젝트",
     tasks: [],
+    hiddenCols: [],   // columns hidden from view (data preserved) — see column visibility
+    deletedCols: [],  // columns removed + data wiped (spreadsheet-style delete)
   };
 }
 
@@ -1748,8 +2135,10 @@ function addTask(parentId, seed = {}) {
     end_date: seed.end_date || "",
     expanded: true,
   };
+  markBeforeChange();
   state.project.tasks.push(task);
   if (parent) parent.expanded = true;
+  flushHistory();
   emit(); saveSoon();
   return task;
 }
@@ -1776,13 +2165,16 @@ function isProgressEditable(status) {
 function deleteTask(id) {
   const all = [id, ...descendantsOf(id).map(t => t.id)];
   const set = new Set(all);
+  markBeforeChange();
   state.project.tasks = state.project.tasks.filter(t => !set.has(t.id));
+  flushHistory();
   emit(); saveSoon();
 }
 
 function updateTask(id, patch) {
   const t = findTask(id);
   if (!t) return;
+  markBeforeChange();   // no-op if an inline-edit group already captured the pre-edit snapshot
   Object.assign(t, patch);
   // If status changed, normalize progress: not-started → 0, completed → 100.
   // blocked/on-hold keep whatever value the task had (frozen mid-progress).
@@ -1792,6 +2184,16 @@ function updateTask(id, patch) {
   if (patch.progress !== undefined) {
     t.progress = clampProgress(t.progress);
   }
+  flushHistory();
+  emit(); saveSoon();
+}
+
+// Expand/collapse is view state — intentionally NOT recorded in undo history (undoing a
+// collapse instead of your last real edit would be surprising).
+function toggleExpanded(id) {
+  const t = findTask(id);
+  if (!t) return;
+  t.expanded = !t.expanded;
   emit(); saveSoon();
 }
 
@@ -1802,6 +2204,7 @@ function updateTask(id, patch) {
 function updateTaskField(id, key, value) {
   const t = findTask(id);
   if (!t) return;
+  markBeforeChange();   // capture pre-edit snapshot on first keystroke; committed on blur/Enter
   t[key] = value;
   saveSoon(true);
 }
@@ -2086,6 +2489,7 @@ function renderToolbar() {
 function renderWbs() {
   const root = $("#wbs");
   root.innerHTML = "";
+  applyGridColumns();   // keep the grid track list in sync with hidden/deleted columns
   const tasks = state.project.tasks;
   if (!tasks.length) {
     root.appendChild(el("div", { class: "empty" }, [
@@ -2114,12 +2518,13 @@ function renderWbs() {
   const dowMon = (rangeStart.getUTCDay() + 6) % 7; // Mon=0, Tue=1, ..., Sun=6
   document.documentElement.style.setProperty("--weekend-offset", (-dowMon * dayW) + "px");
 
-  // Header row — each data column gets a click-to-pin selector and a resize handle
-  // (Gantt column doesn't).
-  const headerCells = RESIZABLE_COLUMNS.map(col => {
+  // Header row — each visible data column gets a click-to-pin selector, a resize handle,
+  // and a right-click context menu (숨김/삭제/숨김 해제). Gantt column gets none.
+  const headerCells = visibleColumns().map(col => {
     const cell = el("div", { class: "cell" }, [col.label]);
     attachColumnSelector(cell, col);
     attachColumnResizer(cell, col);
+    attachColumnMenu(cell, col);
     return cell;
   });
   const headerRow = el("div", { class: "grid-row header-row" }, [
@@ -2216,7 +2621,7 @@ function renderTaskRow(t, rangeStart, dayW, ganttW, todayOffset, holidayPosition
   // Name cell with toggle, level badge, name input, action buttons
   const toggle = el("span", {
     class: "toggle" + (hasChildrenFlag ? "" : " leaf"),
-    onclick: () => updateTask(t.id, { expanded: !t.expanded }),
+    onclick: () => toggleExpanded(t.id),
   }, [hasChildrenFlag ? (t.expanded === false ? "▶" : "▼") : "•"]);
 
   const nameInput = inlineTextInput(t.id, "name", {
@@ -2319,10 +2724,22 @@ function renderTaskRow(t, rangeStart, dayW, ganttW, todayOffset, holidayPosition
         : t.status === "completed"  ? "완료 상태 — 100% 고정 (상태를 '진행중'으로 바꾸면 수정 가능)"
         : t.status === "not-started" ? "시작 전 — 0% 고정 (상태를 '진행중'으로 바꾸면 수정 가능)"
         : "현재 상태에서는 진행률 직접 수정 불가",
+      // Update the model quietly while typing (no re-render → input keeps focus, so
+      // multi-digit values can be typed) and slide the fill bar live. The single undo
+      // step + full normalize/re-render happen on commit (onchange = blur/Enter).
       oninput: e => {
         if (!progressEditable) return;
+        markBeforeChange();
         const v = clampProgress(e.target.value);
-        updateTask(t.id, { progress: v });
+        t.progress = v;
+        saveSoon(true);
+        const fill = e.target.closest(".progress-cell") &&
+                     e.target.closest(".progress-cell").querySelector(".progress-fill-bar");
+        if (fill) fill.style.width = v + "%";
+      },
+      onchange: e => {
+        if (!progressEditable) return;
+        updateTask(t.id, { progress: clampProgress(e.target.value) });
       },
       onfocus: e => e.target.select(),
     }),
@@ -2398,10 +2815,17 @@ function renderTaskRow(t, rangeStart, dayW, ganttW, todayOffset, holidayPosition
     }));
   }
 
+  // Only append cells for columns that are visible, in the same order visibleColumns()
+  // yields — so body cells line up exactly with the header cells and the --grid-cols track
+  // list (all three driven by visibleColumns()).
+  const cellByKey = {
+    name: nameCell, rfp: rfpCell, assignee: assigneeCell, deliv: delivCell,
+    status: statusCell, progress: progressCell, start: startCell, end: endCell,
+  };
   const row = el("div", {
     class: "grid-row task-row level-" + t.level,
     dataset: { taskId: t.id },
-  }, [nameCell, rfpCell, assigneeCell, delivCell, statusCell, progressCell, startCell, endCell, ganttCell]);
+  }, [...visibleColumns().map(c => cellByKey[c.key]), ganttCell]);
   attachRowSelector(row, t.id);
 
   return row;
@@ -2663,6 +3087,7 @@ function exportJson() {
   const data = JSON.stringify(payload, null, 2);
   const blob = new Blob([data], { type: "application/json" });
   triggerDownload(blob, `${safeFilename()}-wbs.json`);
+  state.dirty = false; // current content now lives in a file
 }
 
 // Preorder traversal of all tasks (regardless of expanded state).
@@ -2756,6 +3181,7 @@ async function exportExcel() {
   const arr = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   const blob = new Blob([arr], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   triggerDownload(blob, `${safeFilename()}-wbs.xlsx`);
+  state.dirty = false; // current content now lives in a file
   $("#saveStatus").textContent = "엑셀 저장됨";
   setTimeout(() => { if ($("#saveStatus").textContent === "엑셀 저장됨") $("#saveStatus").textContent = ""; }, 1500);
 }
@@ -2865,6 +3291,76 @@ function exportPdf() {
   window.print();
 }
 
+//============ New project ============
+// Replace the current project with a fresh empty one. The previous project is
+// discarded from memory AND overwritten in localStorage, so this is the one true
+// data-loss path in the app — callers must guard it via requestNewProject().
+function doNewProject() {
+  state.project = newProject();
+  state.view = "wbs";
+  state.filter = { assignee: "", status: "all" };
+  colSelection.clear();
+  resetHistory();
+  $("#projectName").value = state.project.name;
+  const af = $("#assigneeFilter"); if (af) af.value = "";
+  emit();
+  saveSoon();          // persist the empty project + show "saving…/saved"
+  state.dirty = false; // an empty project has nothing to lose
+}
+
+// Entry point for the "새로 만들기" button. If the current project has
+// unsaved-to-file work, ask the user to save / discard / cancel first.
+function requestNewProject() {
+  if (state.dirty && state.project && state.project.tasks.length > 0) {
+    openNewProjectDialog();
+  } else {
+    doNewProject();
+  }
+}
+
+// Three-way guard dialog: 저장(JSON export) → discard, 저장 안 함 → discard, 취소 → keep.
+// Matches the Import-mapping modal conventions: backdrop does NOT close (explicit
+// ×/취소/Esc only) so a stray click can't drop the user's work.
+function openNewProjectDialog() {
+  const backdrop = el("div", { class: "modal-backdrop" });
+  const card = el("div", { class: "modal-card", style: { maxWidth: "440px" }, onclick: e => e.stopPropagation() });
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  document.addEventListener("keydown", onKey);
+
+  card.appendChild(el("button", {
+    class: "modal-close", type: "button", title: "닫기 (Esc)", "aria-label": "닫기", onclick: close,
+  }, ["×"]));
+  card.appendChild(el("h2", {}, ["새로 만들기"]));
+  card.appendChild(el("div", { class: "modal-hint" }, [
+    "저장하지 않은 변경사항이 있습니다.",
+    el("br"),
+    el("strong", { style: { color: "var(--fc-danger)" } },
+      ["저장하지 않고 새로 만들면 현재 내용은 영구히 사라집니다."]),
+    el("br"),
+    "(현재 작업을 보존하려면 먼저 파일로 저장하세요.)",
+  ]));
+
+  const cancelBtn = el("button", { class: "top-btn", onclick: close }, ["취소"]);
+  const discardBtn = el("button", {
+    class: "top-btn",
+    style: { color: "var(--fc-danger)", borderColor: "var(--fc-danger-2)" },
+    onclick: () => { close(); doNewProject(); },
+  }, ["저장 안 함"]);
+  const saveBtn = el("button", {
+    class: "top-btn primary",
+    onclick: () => { exportJson(); close(); doNewProject(); },
+  }, ["저장 후 새로 만들기"]);
+
+  card.appendChild(el("div", { class: "modal-actions" }, [cancelBtn, discardBtn, saveBtn]));
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+  saveBtn.focus();
+}
+
 // Dispatch by file extension: .json → JSON restore, .xlsx → Excel sheet import.
 function importProject(file) {
   const lower = file.name.toLowerCase();
@@ -2910,7 +3406,18 @@ function importJson(file) {
             expanded: t.expanded !== false,
           };
         }),
+        hiddenCols: Array.isArray(data.hiddenCols) ? data.hiddenCols : [],
+        deletedCols: Array.isArray(data.deletedCols) ? data.deletedCols : [],
       };
+      ensureColumnState(state.project);
+      // A deleted column's data is gone from the source rows; if the file carried
+      // deletedCols, make sure those fields really are cleared on the imported tasks.
+      for (const k of state.project.deletedCols) {
+        const meta = colMeta(k), clearVal = clearValueForField(meta.field);
+        for (const t of state.project.tasks) t[meta.field] = clearVal;
+      }
+      reconcileColSelection();
+      resetHistory();   // a freshly imported document starts with an empty undo history
       emit(); saveSoon();
     } catch (err) {
       alert("JSON Import 실패: " + err.message);
@@ -3713,7 +4220,11 @@ async function importExcel(file) {
       version: SCHEMA_VERSION,
       name: chosen.name && chosen.name !== "WBS" ? chosen.name : (state.project.name || "imported"),
       tasks,
+      hiddenCols: [],
+      deletedCols: [],
     };
+    reconcileColSelection();
+    resetHistory();
     emit(); saveSoon();
     $("#saveStatus").textContent = `${tasks.length}건 import됨`;
     setTimeout(() => { if (/import됨$/.test($("#saveStatus").textContent)) $("#saveStatus").textContent = ""; }, 1800);
@@ -3729,6 +4240,12 @@ function init() {
   // Apply persisted column widths before first render so the layout doesn't flash defaults.
   loadColumnWidths();
   state.project = loadProject() || newProject();
+  ensureColumnState(state.project);   // guarantee hiddenCols/deletedCols exist
+  applyGridColumns();                 // build the initial grid track list from visible columns
+  resetHistory();                     // start with an empty undo history
+  // Loaded content lives in localStorage but not in a file — treat it as unsaved-to-file
+  // so "새로 만들기" warns before discarding it. A fresh empty project has nothing to lose.
+  state.dirty = state.project.tasks.length > 0;
 
   // Top bar
   $("#projectName").addEventListener("input", e => {
@@ -3736,6 +4253,9 @@ function init() {
     saveSoon();
   });
   $("#btnAddRoot").addEventListener("click", () => addTask(null));
+  $("#btnUndo").addEventListener("click", undo);
+  $("#btnRedo").addEventListener("click", redo);
+  $("#btnNew").addEventListener("click", requestNewProject);
   $("#btnImport").addEventListener("click", () => $("#fileImport").click());
   $("#fileImport").addEventListener("change", e => {
     const f = e.target.files[0];
@@ -3768,6 +4288,23 @@ function init() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !exportMenu.hidden) setMenuOpen(false);
   });
+
+  // Undo / redo: Ctrl/⌘+Z, and Ctrl/⌘+Shift+Z or Ctrl+Y for redo. We commit any focused
+  // inline edit first (blur fires its change handler → one undo step for that edit), then
+  // run undo/redo. This intercepts the browser's native text-undo while a field is focused,
+  // which is the intended trade-off: Ctrl+Z always means "undo my last change" here.
+  document.addEventListener("keydown", (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const k = e.key.toLowerCase();
+    const isRedo = (k === "z" && e.shiftKey) || (k === "y" && !e.shiftKey);
+    const isUndo = k === "z" && !e.shiftKey;
+    if (!isUndo && !isRedo) return;
+    e.preventDefault();
+    const ae = document.activeElement;
+    if (ae && ae.matches && ae.matches("input, textarea, select")) ae.blur();
+    if (isRedo) redo(); else undo();
+  });
+
   $("#btnReport").addEventListener("click", () => {
     state.view = state.view === "report" ? "wbs" : "report";
     emit();
