@@ -1772,6 +1772,13 @@ function deleteColumns(keys) {
 // ops + task add/delete/edit all flow through here. Inline text/number edits are grouped
 // into ONE undo step via markBeforeChange (captures the pre-edit clone on the first
 // keystroke) + flushHistory (commits it on blur/Enter). See keydown wiring in init().
+//
+// NOTE (realtime collaboration): this snapshot model is single-user only. In a shared room an
+// undo here would revert OTHER people's edits too, because each entry is a deep clone of the
+// WHOLE project. The sync adapter therefore swaps undo/redo for a Y.UndoManager scoped to this
+// client's own changes while a room is joined, and restores these on leave. If you change the
+// shape of `history` or of undo()/redo()/markBeforeChange()/flushHistory()/updateUndoButtons(),
+// check sync/adapters/k-wbs.js — see docs/realtime-local-dev.md in the aiotool repo.
 const HISTORY_LIMIT = 200;
 const history = { past: [], future: [], pendingBase: null };
 
